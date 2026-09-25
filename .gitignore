@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Compilación y empaquetado (contienen rutas locales de la PC)
+build/
+dist/
+*.spec
+
+# Driver de cámara virtual (compilados)
+vcam_driver/build/
+vcam_driver/bin/
+vcam_driver/tests/bin/
+*.old-*
+
+# Herramientas locales de terceros
+.agents/
+
+# Archivos de prueba, grabaciones y reportes
+*.mp4
+*.wav
+Reporte_IA_*.json
+camera_presets.json
+data/
+
+# Editor / sistema
+.vscode/
+.idea/
+*.log
+Thumbs.db
+desktop.ini

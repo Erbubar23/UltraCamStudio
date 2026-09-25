@@ -1,0 +1,46 @@
+UltraCam Studio 2.0 (beta de prueba) · Versión PORTABLE
+======================================================
+
+No hay que instalar nada.
+
+CÓMO USARLA
+- Descomprime la carpeta «UltraCamStudio» donde quieras (Escritorio, Documentos
+  o una memoria USB) y abre «UltraCamStudio.exe».
+- Windows puede mostrar «Windows protegió tu PC» porque el programa aún no está
+  firmado: pulsa «Más información» y luego «Ejecutar de todas formas».
+- Tu configuración (canales, efectos…) se guarda en la carpeta «data» junto
+  al programa: si copias la carpeta a otra PC, se lleva todo.
+- Todo lo necesario viene incluido (FFmpeg, scrcpy, motor de audio). No hace falta Python.
+- No la pongas dentro de «Archivos de programa»: ahí Windows no deja guardar la configuración.
+
+PANTALLA PRINCIPAL (lo básico)
+- Izquierda: tus cámaras. Elige una y la imagen aparece en el centro.
+- Arriba: «Cámara Virtual» (envía esa cámara a Zoom, Teams, OBS…) y ⚙ Configuración.
+- Derecha: resolución y fps de la cámara, y el MEZCLADOR: cada canal tiene
+  FX (efectos), 🎧 (escucharlo en tus audífonos), S (solo), M (silencio) y volumen.
+- Abajo: «Grabar».
+
+TU GUITARRA CON UN AMPLIFICADOR VIRTUAL (p. ej. Tonocracy)
+1. ⚙ Configuración › Audio: elige «ASIO» y el driver de tu interfaz (p. ej. UMC ASIO Driver).
+   Búfer 128 para tocar con poca latencia.
+2. ⚙ Configuración › Canales y efectos: «+ Nuevo canal», Fuente «Entrada 1», Mono al centro,
+   activa «Escucharlo en el Monitor».
+3. En «Efectos (VST3)» elige «Tonocracy» y pulsa «Abrir» para elegir tu tono. El preset se
+   guarda solo.
+4. Cierra Tonocracy standalone (si lo tenías abierto): ASIO solo admite un programa a la vez.
+
+CÁMARA VIRTUAL «UltraCam» (Zoom, Teams, Discord, Meet, OBS, navegadores)
+- «UltraCam» aparece sola en la lista de cámaras de esos programas; no necesitas OBS.
+- Pulsa «Cámara Virtual» en la pantalla principal para enviarle la cámara elegida.
+- Mientras no le envíes nada muestra «Sin señal», y con UltraCam cerrado,
+  «UltraCam Studio está cerrado»: los demás programas nunca pierden la cámara.
+
+TELÉFONOS
+- Android: activa la «Depuración USB» (la app te explica cómo en «Conectar un móvil»)
+  y conéctalo por cable. Necesita Android 12 o superior.
+- iPhone: instala Iriun Webcam en el iPhone y en la PC (iriun.com).
+
+SI ALGO FALLA
+- ⚙ Configuración › Avanzado › «Copiar registro» y pégalo en tu mensaje junto con
+  lo que estabas haciendo.
+- Las grabaciones se guardan en: Videos\GalaxyCam
