@@ -42,7 +42,7 @@ from presentation.dialogs.welcome_dialog import WelcomeDialog
 from presentation.dialogs.summary_dialog import TakeSummaryDialog
 
 APP_NAME = "UltraCam Studio"
-APP_VERSION = "2.1.0-beta"
+APP_VERSION = "2.1.1-beta"
 
 ctk.set_appearance_mode("Dark")
 
@@ -1941,7 +1941,11 @@ class GalaxyCamApp(ctk.CTk):
                 first_growth = time.monotonic()    # llegó el primer cuadro (así se alinea el audio del teléfono)
             if size > 512 * 1024:
                 if sm.recording_started_at is None:
+                    # Último recurso: el .mkv crece recién al cerrar su primer bloque (~5 MB o 5 s),
+                    # así que esta hora llega tarde y el audio puede quedar adelantado.
                     sm.recording_started_at = first_growth
+                    self.engine.log("Sin aviso de inicio de grabación: la sincronía se estima por el tamaño "
+                                    "del archivo y puede quedar corrida.", "WARN")
                 self._ui(lambda: self._begin_audio(gen, out_dir))
                 return
         self._ui(lambda: self._recording_failed(t("rec.no_frames")))
@@ -1984,7 +1988,7 @@ class GalaxyCamApp(ctk.CTk):
         av_offset = audio_start - video_start if audio_start and video_start else 0.0
         if abs(av_offset) > 20:
             av_offset = 0.0         # reloj de la cámara en otra escala (algunas capturadoras): sin ajuste
-        self._on_engine_log(f"Audio respecto al video: {av_offset:+.3f} s", "REC")
+        self.engine.log(f"Audio respecto al video: {av_offset:+.3f} s (ajuste manual {self.sync_ms:+d} ms)", "REC")
         options = {
             "output_dir": self.record_dir_var.get(),
             "prefix": (self.record_prefix_var.get().strip() or "UltraCam_Session"),
@@ -1994,6 +1998,7 @@ class GalaxyCamApp(ctk.CTk):
             "normalize": self.norm_mode,
             "sync_offset_ms": self.sync_ms,
             "av_offset_s": round(av_offset, 3),
+            "phone_serial": getattr(self._selected(), "serial", None),   # relojes del teléfono (pista guía)
             "reveal_in_explorer": self.opt_reveal.get(),
             "auto_play": self.opt_autoplay.get(),
         }

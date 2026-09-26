@@ -10,6 +10,7 @@ import time
 import unittest
 from unittest.mock import patch, MagicMock
 import tempfile
+import numpy as np
 
 # Asegurar importación del backend
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +45,18 @@ class TestCommandBuilding(unittest.TestCase):
         # 2. NO debe incluir flags de control que causen AssertionError: Unexpected message type: 10
         self.assertNotIn("--turn-screen-off", cmd, "--turn-screen-off no debe estar presente porque rompe en Android 16 con no-control")
         self.assertNotIn("--stay-awake", cmd, "--stay-awake no debe estar presente porque requiere control")
+
+    def test_guide_track_only_when_recording_and_never_played(self):
+        """La pista guía (micrófono del teléfono) va al .mkv al grabar, sin sonar en el PC."""
+        rec_dir = tempfile.mkdtemp()
+        cmd = self.engine.build_command({"serial": "X", "record_video": True, "record_dir": rec_dir})
+        self.assertIn("--audio-source=mic-camcorder", cmd)
+        self.assertIn("--no-audio-playback", cmd)
+        self.assertNotIn("--no-audio", cmd)
+        preview = self.engine.build_command({"serial": "X"})
+        self.assertIn("--no-audio", preview)
+        off = self.engine.build_command({"serial": "X", "record_video": True, "record_dir": rec_dir, "guide_audio": False})
+        self.assertIn("--no-audio", off)
 
     def test_4k_command_configuration(self):
         """Verifica la configuración para streaming 4K UHD a 50M H.265"""
@@ -1150,8 +1163,57 @@ class TestRecordingJoin(unittest.TestCase):
         results = [MagicMock(returncode=rc, stdout="", stderr="línea\n" * 50 + "Conversion failed!") for rc in returncodes]
         with patch("subprocess.run", side_effect=results) as run:
             res = self.engine.finalize_recording(self.video, self.audio,
-                                                 dict({"output_dir": self.dir, "prefix": "T"}, **options))
+                                                 dict({"output_dir": self.dir, "prefix": "T", "guide_sync": False},
+                                                      **options))
         return res, [c.args[0] for c in run.call_args_list]
+
+    def _join_with_guide(self, sync, **options):
+        self.audio["duration"] = 300.0
+        with patch("infrastructure.video.av_sync.measure", return_value=sync) as measure:
+            res, cmds = self._join(guide_sync=True, **options)
+        self.assertEqual(measure.call_args.args[2], [self.master, self.track])
+        return res, cmds
+
+    def test_guide_track_sets_offset_shifts_video_and_fixes_drift(self):
+        sync = {"video_start": 0.367, "offset": -2.373, "drift": 80e-6, "psr": 18.0, "ref": self.master}
+        _, cmds = self._join_with_guide(sync, av_offset_s=-3.5, sync_offset_ms=20)
+        cmd = cmds[0]
+        # la pista guía manda sobre las horas de inicio; el ajuste manual se suma
+        self.assertEqual(cmd[cmd.index(self.master) - 3: cmd.index(self.master)], ["-ss", "2.353", "-i"])
+        # el .mkv empieza con la pista guía: el primer cuadro pasa a ser el tiempo 0
+        self.assertEqual(cmd[cmd.index(self.video) - 3: cmd.index(self.video)], ["-itsoffset", "-0.367", "-i"])
+        # 80 ppm en 300 s son 24 ms: se corrige en todas las pistas
+        self.assertIn("asetrate=48004,aresample=48000", cmd[cmd.index("-filter:a:0") + 1])
+        self.assertEqual(cmd[cmd.index("-filter:a:1") + 1], "asetrate=48004,aresample=48000")
+
+    def test_phone_clock_gap_from_dumpsys(self):
+        from infrastructure.video import av_sync
+        out = (b"  Runtime uptime (elapsed): +3d13h26m47s229ms\n"
+               b"  Runtime uptime (uptime): +2d4h32m53s733ms\n")
+        with patch.object(av_sync, "_run", return_value=MagicMock(returncode=0, stdout=out)):
+            self.assertAlmostEqual(av_sync.phone_clock_gap("adb", "X"), 118433.496, places=3)
+        with patch.object(av_sync, "_run", return_value=MagicMock(returncode=1, stdout=b"")):
+            self.assertIsNone(av_sync.phone_clock_gap("adb", "X"))
+
+    def test_video_on_other_phone_clock_needs_the_gap(self):
+        # con --capture-orientation la imagen viene horas «después» que la pista guía
+        from infrastructure.video import av_sync
+        with patch.object(av_sync, "_decode", return_value=np.ones(10 * av_sync.FS, np.float32)), \
+                patch.object(av_sync, "first_video_time", return_value=118434.004), \
+                patch.object(av_sync, "_measure_at", return_value=(2.0, 20.0)):
+            res = av_sync.measure("ffmpeg", "v.mkv", ["m.wav"], clock_gap=lambda: 118433.496)
+            self.assertAlmostEqual(res["offset"], -(0.508 + 2.0), places=3)
+            self.assertEqual(res["video_start"], 118434.004)
+            res = av_sync.measure("ffmpeg", "v.mkv", ["m.wav"], clock_gap=lambda: None)
+            self.assertIsNone(res["offset"], "sin la diferencia de relojes no se adivina")
+
+    def test_unreliable_guide_falls_back_to_start_times(self):
+        sync = {"video_start": 0.367, "offset": None, "drift": 0.0, "psr": 0.0, "ref": None}
+        _, cmds = self._join_with_guide(sync, av_offset_s=-2.5, normalize="off")
+        cmd = cmds[0]
+        self.assertEqual(cmd[cmd.index(self.master) - 3: cmd.index(self.master)], ["-ss", "2.500", "-i"])
+        self.assertIn("-itsoffset", cmd[: cmd.index(self.video)])
+        self.assertNotIn("-filter:a:0", cmd)
 
     def test_audio_that_started_early_is_trimmed_and_late_is_delayed(self):
         _, cmds = self._join(av_offset_s=-2.5)
@@ -1178,7 +1240,8 @@ class TestRecordingJoin(unittest.TestCase):
         for p in (self.video, self.master, self.track):
             open(p, "wb").close()
         with patch("subprocess.run", side_effect=fail):
-            res = self.engine.finalize_recording(self.video, self.audio, {"output_dir": self.dir, "prefix": "T"})
+            res = self.engine.finalize_recording(self.video, self.audio,
+                                                 {"output_dir": self.dir, "prefix": "T", "guide_sync": False})
         self.assertFalse(res["success"])
         self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".mp4")], [])
         self.assertTrue(os.path.exists(self.video), "los originales se conservan")
@@ -1194,6 +1257,20 @@ class TestRecordingJoin(unittest.TestCase):
         time.sleep(0.2)
         self.assertAlmostEqual(sm.video_start_ts, 56237.628313, places=4)
         self.assertIsNotNone(sm.recording_started_at)
+        sm.stop_stream()
+
+    def test_stream_manager_scrcpy_first_frame_from_stdout(self):
+        # scrcpy da sus INFO por stdout: «Recording started» sale antes de abrir la cámara
+        # y no cuenta; el primer cuadro es «Texture:».
+        from infrastructure.video.stream_manager import StreamManager
+        sm = StreamManager()
+        script = ("import sys, time; print('INFO: Recording started to matroska file: x.mkv', flush=True); "
+                  "time.sleep(0.6); print('INFO: Texture: 1920x1080', flush=True); time.sleep(0.2)")
+        t0 = time.monotonic()
+        sm.start_stream([sys.executable, "-c", script], is_ffmpeg_rec=False, piped_preview=False,
+                        ffplay_path=None, window_title="t")
+        self.assertTrue(sm.recording_started.wait(5))
+        self.assertGreater(sm.recording_started_at - t0, 0.5)
         sm.stop_stream()
 
 

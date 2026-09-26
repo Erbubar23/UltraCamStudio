@@ -215,7 +215,8 @@ class VirtualCamBridge:
                "-probesize", "512k", "-analyzeduration", "0",
                "-f", "matroska", "-i", "pipe:0"]
         if self.record_path:
-            cmd += ["-map", "0:v", "-c", "copy", "-f", "matroska", self.record_path]
+            # «0:a?»: la pista guía del teléfono, si viene, para alinear el audio al unir la toma
+            cmd += ["-map", "0:v", "-map", "0:a?", "-c", "copy", "-f", "matroska", self.record_path]
         if self.sink:
             # La cámara virtual se limita a VCAM_FPS: el archivo conserva los fps del
             # teléfono (va por copia directa) y el reparto no compite con la grabación.

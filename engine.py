@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import json
 import re
+import wave
 from typing import Optional, List, Dict, Any, Callable
 
 import paths
@@ -25,6 +26,7 @@ from infrastructure.video.command_builder import CommandBuilder, PREVIEW_HEIGHT,
 from infrastructure.video.device_scanner import DeviceScanner
 from infrastructure.video.stream_manager import StreamManager
 from infrastructure.video.report_service import ReportService
+from infrastructure.video import av_sync
 from infrastructure.persistence.settings_manager import SettingsManager
 
 # Codificadores por hardware en orden de preferencia
@@ -621,6 +623,24 @@ class CameraEngine:
     # -------------------------------------------------------------------------
     # POST-PROCESAMIENTO Y REPORTES
     # -------------------------------------------------------------------------
+    def _guide_sync(self, video_path: str, refs: List[str], serial: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Medir la sincronía nunca debe costar la toma: ante cualquier fallo, se une sin ella."""
+        def clock_gap():
+            return av_sync.phone_clock_gap(self.adb_path, serial) if self.adb_path and serial else None
+        try:
+            return av_sync.measure(self.ffmpeg_path, video_path, refs, clock_gap=clock_gap)
+        except Exception as e:
+            self.log(f"No se pudo medir la sincronía por pista guía: {e}", "WARN")
+            return None
+
+    @staticmethod
+    def _wav_rate(path: str) -> int:
+        try:
+            with wave.open(path, "rb") as w:
+                return w.getframerate()
+        except (OSError, wave.Error, EOFError):
+            return 48000
+
     def post_process_session(self, video_path: str, audio_info: dict, options: dict) -> Dict[str, Any]:
         if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
             return {"success": False, "error": "ffmpeg_missing", "message": "FFmpeg no encontrado."}
@@ -648,9 +668,31 @@ class CameraEngine:
         sync_offset_ms = options.get("sync_offset_ms", 0)
         export_stems = options.get("export_stems", False)
 
-        # Alineación: audio_start - video_start (medidos en el mismo reloj) + ajuste manual.
-        offset = sync_offset_ms / 1000.0 + float(options.get("av_offset_s") or 0.0)
-        cmd = [self.ffmpeg_path, "-y", "-i", video_path]
+        # Alineación: primero por el sonido (pista guía del teléfono); si no hay o no es confiable,
+        # por las horas de inicio (audio_start − video_start, en el mismo reloj). Más el ajuste manual.
+        offset = float(options.get("av_offset_s") or 0.0)
+        video_shift, drift = 0.0, 0.0
+        refs = [w for w in [master_wav] + [w for w, _ in channel_tracks] if w and os.path.exists(w)]
+        sync = (self._guide_sync(video_path, refs, options.get("phone_serial"))
+                if options.get("guide_sync", True) and refs else None)
+        if sync:
+            video_shift = sync["video_start"]        # el .mkv empieza con la pista guía: el video, un poco después
+            if sync["offset"] is not None:
+                offset, drift = sync["offset"], sync["drift"]
+                self.log(f"Sincronía por pista guía: audio {offset:+.3f} s, deriva {drift * 1e6:+.0f} ppm "
+                         f"(calidad {sync['psr']:.0f}, referencia {os.path.basename(sync['ref'])})", "REC")
+            else:
+                self.log("La pista guía no coincidió con el audio del PC; se alinea por las horas de inicio.", "WARN")
+        offset += sync_offset_ms / 1000.0
+        # La deriva solo se corrige si llega a notarse en la toma (más de 10 ms entre inicio y final).
+        drift_filter = None
+        if abs(drift) * float(audio_info.get("duration") or 0.0) > 0.010 and master_wav and os.path.exists(master_wav):
+            sr = self._wav_rate(master_wav)
+            drift_filter = f"asetrate={round(sr * (1 + drift))},aresample={sr}"
+        cmd = [self.ffmpeg_path, "-y"]
+        if video_shift > 0.0005:
+            cmd.extend(["-itsoffset", f"{-video_shift:.3f}"])
+        cmd.extend(["-i", video_path])
 
         audio_tracks_to_add = []
         if master_wav and os.path.exists(master_wav):
@@ -679,9 +721,15 @@ class CameraEngine:
         norm_filter = {"ebu_r128": "loudnorm=I=-14:TP=-1.0:LRA=11",
                        "peak": "alimiter=limit=0.891:level=disabled"}.get(normalize)   # techo de −1 dBFS
         has_master = bool(audio_tracks_to_add) and audio_tracks_to_add[0][0] == master_wav
-        plain_cmd = cmd + [final_mp4_path]
-        if norm_filter and has_master:
-            cmd.extend(["-filter:a:0", norm_filter])
+        plain_cmd = list(cmd)
+        for i in range(len(audio_tracks_to_add)):
+            chain = [drift_filter] if drift_filter else []
+            plain_cmd.extend(["-filter:a:" + str(i), ",".join(chain)] if chain else [])
+            if i == 0 and norm_filter and has_master:
+                chain.append(norm_filter)
+            if chain:
+                cmd.extend([f"-filter:a:{i}", ",".join(chain)])
+        plain_cmd.append(final_mp4_path)
         cmd.append(final_mp4_path)
 
         self.log(f"Multiplexando post-grabación con FFmpeg (audio desplazado {offset:+.3f} s)...", "REC")

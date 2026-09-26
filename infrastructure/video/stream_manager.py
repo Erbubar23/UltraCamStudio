@@ -25,6 +25,9 @@ class StreamManager:
         self.vcam = None
         self.is_running: bool = False
         self._graceful_stop: bool = False
+        # scrcpy grabando: se le cierra la ventana (como el botón X) para que escriba el final
+        # del .mkv; matarlo pierde el último bloque del archivo (hasta ~5 MB o 5 s de video).
+        self._close_window_title: Optional[str] = None
         self.recording_started: threading.Event = threading.Event()
         self.current_recording_file: Optional[str] = None
         # Momento del primer cuadro, en el reloj de time.monotonic(): ffmpeg (dshow) lo informa
@@ -43,13 +46,18 @@ class StreamManager:
 
             self.vcam = vcam_bridge
             self._graceful_stop = is_ffmpeg_rec
+            records = any(str(a).startswith("--record=") for a in cmd)
+            self._close_window_title = window_title if records and not is_ffmpeg_rec else None
             no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
             try:
+                # stdout se lee siempre: scrcpy escribe ahí sus INFO, entre ellos «Texture:», que
+                # sale al decodificar el primer cuadro. El tamaño del .mkv no sirve (el muxer retiene
+                # los datos hasta juntar ~5 MB o 5 s) y «Recording started» sale antes de abrir la cámara.
                 self.process = subprocess.Popen(
                     cmd,
                     stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE if piped_preview else subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     creationflags=no_window
                 )
@@ -84,7 +92,7 @@ class StreamManager:
                             if clean_l.startswith("frame=") and clean_l[6:].strip() not in ("", "0"):
                                 self._mark_started(started_evt)
                             continue
-                        if "Recording started" in clean_l:
+                        if clean_l.startswith("INFO: Texture:"):
                             self._mark_started(started_evt)
                         if self.video_start_ts is None and clean_l.startswith("Duration:"):
                             m = re.search(r"start: (-?[\d.]+)", clean_l)
@@ -94,6 +102,8 @@ class StreamManager:
                     stream.close()
 
                 threading.Thread(target=monitor_output, args=(proc.stderr, "STREAM-ERR"), daemon=True).start()
+                if not piped_preview:
+                    threading.Thread(target=monitor_output, args=(proc.stdout, "STREAM-OUT"), daemon=True).start()
 
                 def wait_for_exit():
                     code = proc.wait()
@@ -142,6 +152,8 @@ class StreamManager:
             self.process = None
             self.is_running = False
 
+            if proc and proc.poll() is None and self._close_window_title:
+                self._close_window(proc, self._close_window_title)
             if proc and proc.poll() is None:
                 GLOBAL_PROCESS_MANAGER.stop_process(proc, graceful=self._graceful_stop, timeout=4.0)
 
@@ -157,6 +169,35 @@ class StreamManager:
             self._cleanup_vcam()
 
             GLOBAL_LOGGER.log("Streaming y procesos de cámara detenidos limpiamente.", "PROCESS")
+
+    @staticmethod
+    def _close_window(proc: subprocess.Popen, title: str, timeout: float = 5.0) -> None:
+        if sys.platform != "win32":
+            return
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        # El monitor suele seguir incrustado en la interfaz (ventana hija): FindWindow no lo ve.
+        found = []
+        proto = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+
+        def match(h, _l):
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(h, buf, 256)
+            if buf.value == title:
+                found.append(h)
+                return False
+            return True
+
+        user32.EnumChildWindows(user32.GetDesktopWindow(), proto(match), 0)   # recorre también las hijas
+        if not found:
+            return
+        user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.PostMessageW(found[0], 0x0010, 0, 0)       # WM_CLOSE
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            GLOBAL_LOGGER.log(f"scrcpy no cerró solo en {timeout:.0f} s; se fuerza el cierre.", "WARN")
 
     def _cleanup_preview(self):
         pv = self.preview_process

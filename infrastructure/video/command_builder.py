@@ -90,6 +90,11 @@ class CommandBuilder:
             cmd.append("--audio-source=mic-camcorder")
             cmd.append("--audio-codec=opus")
             cmd.append("--audio-bit-rate=128K")
+        elif full_record_path and config.get("guide_audio", True):
+            # Pista guía: el micrófono del teléfono va al .mkv con el mismo reloj que la imagen.
+            # No se escucha ni queda en la toma final; solo sirve para alinear el audio del PC.
+            cmd += ["--audio-source=mic-camcorder", "--audio-codec=opus", "--audio-bit-rate=64K",
+                    "--no-audio-playback"]
         else:
             cmd.append("--no-audio")
 

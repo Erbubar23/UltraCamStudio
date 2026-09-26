@@ -862,11 +862,43 @@ def _retitle_editor(title: str, closed: threading.Event):
             u.EnumWindows(cb(enum), 0)
             if found:
                 u.SetWindowTextW(found[0], title)
+                _fit_on_screen(found[0])
                 u.SetForegroundWindow(found[0])
                 return
             time.sleep(0.1)
     except Exception:
         pass
+
+
+def _fit_on_screen(hwnd: int):
+    """La ventana del plugin nace en (−8, −31): la barra de título queda fuera de la pantalla
+    y no se puede arrastrar ni cerrar. Se centra en el área útil de su monitor, con la barra
+    siempre visible aunque la ventana sea más alta que la pantalla."""
+    import ctypes
+    from ctypes import wintypes
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                    ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    u = ctypes.windll.user32
+    u.MonitorFromWindow.restype = wintypes.HMONITOR
+    u.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    u.GetMonitorInfoW.argtypes = [wintypes.HMONITOR, ctypes.POINTER(MONITORINFO)]
+    u.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                               ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    r = wintypes.RECT()
+    mi = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+    if not u.GetWindowRect(hwnd, ctypes.byref(r)):
+        return
+    if not u.GetMonitorInfoW(u.MonitorFromWindow(hwnd, 2), ctypes.byref(mi)):   # 2: el monitor más cercano
+        return
+    wa = mi.rcWork
+    w, h = r.right - r.left, r.bottom - r.top
+    x = wa.left + max(0, (wa.right - wa.left - w) // 2)
+    y = wa.top + max(0, (wa.bottom - wa.top - h) // 2)
+    u.SetWindowPos(hwnd, None, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)   # NOSIZE | NOZORDER | NOACTIVATE
 
 
 class _PcmFeed:
