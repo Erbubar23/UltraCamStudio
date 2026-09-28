@@ -12,6 +12,7 @@ from typing import Optional, Callable, Dict, Any, List
 from infrastructure.logging.app_logger import GLOBAL_LOGGER
 from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER
 from infrastructure.system.win32_window import GLOBAL_WINDOW_EMBEDDER
+from infrastructure.video.command_builder import preview_player_command
 
 
 class StreamManager:
@@ -47,7 +48,9 @@ class StreamManager:
             self.vcam = vcam_bridge
             self._graceful_stop = is_ffmpeg_rec
             records = any(str(a).startswith("--record=") for a in cmd)
-            self._close_window_title = window_title if records and not is_ffmpeg_rec else None
+            # Con --no-window el monitor es un ffplay con el mismo título: no hay que cerrarle nada.
+            has_window = "--no-window" not in cmd
+            self._close_window_title = window_title if records and not is_ffmpeg_rec and has_window else None
             no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
             try:
@@ -65,9 +68,7 @@ class StreamManager:
 
                 if piped_preview and ffplay_path:
                     self.preview_process = subprocess.Popen(
-                        [ffplay_path, "-hide_banner", "-loglevel", "error",
-                         "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop",
-                         "-f", "nut", "-i", "pipe:0", "-window_title", window_title],
+                        preview_player_command(ffplay_path, window_title),
                         stdin=proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         creationflags=no_window
                     )
@@ -78,6 +79,9 @@ class StreamManager:
                 self.video_start_ts = None
                 self.recording_started_at = None
                 started_evt = self.recording_started
+                if vcam_bridge is not None:
+                    # Sin ventana, scrcpy no escribe «Texture:»: el primer cuadro lo avisa el reparto.
+                    vcam_bridge.on_first_frame = lambda: self._mark_started(started_evt)
                 GLOBAL_LOGGER.log(f"Proceso de streaming iniciado con PID {proc.pid}", "PROCESS")
 
                 progress_keys = ("frame=", "fps=", "stream_", "bitrate=", "total_size=", "out_time",

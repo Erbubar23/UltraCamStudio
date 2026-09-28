@@ -99,6 +99,19 @@ def fmt_res(r: str) -> str:
     return r.replace("x", " × ")
 
 
+def res_tier(r: str) -> str:
+    """Nombre corto de la resolución: 4K, 2K, Full HD, HD (o «480p»). Vale en vertical."""
+    try:
+        w, h = (int(v) for v in str(r).lower().split("x"))
+    except ValueError:
+        return str(r)
+    long_side, short_side = max(w, h), min(w, h)
+    for key, lng, sht in (("4k", 3840, 2160), ("2k", 2560, 1440), ("fhd", 1920, 1080), ("hd", 1280, 720)):
+        if long_side >= lng or short_side >= sht:
+            return t(f"mode.tier.{key}")
+    return t("mode.tier.other", p=short_side)
+
+
 def fmt_bitrate(b: str) -> str:
     s = str(b).upper().strip()
     return s if s.endswith("M") else f"{s}M"

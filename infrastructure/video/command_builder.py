@@ -12,6 +12,28 @@ import virtualcam
 PREVIEW_HEIGHT = 540
 PREVIEW_MAX_FPS = 30
 
+# El monitor nunca pasa de Full HD (lado largo 1920): es una ayuda visual y ocupa una parte
+# de la pantalla. Una fuente menor no se agranda; una vertical queda en 1080x1920.
+MONITOR_MAX_SIDE = 1920
+MONITOR_SCALE = (f"scale=w='min(iw,{MONITOR_MAX_SIDE})':h='min(ih,{MONITOR_MAX_SIDE})'"
+                 ":force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear")
+
+
+def exceeds_full_hd(size) -> bool:
+    """True si «AnchoxAlto» pasa de 1920x1080 (en horizontal o en vertical)."""
+    try:
+        w, h = (int(v) for v in str(size).lower().split("x"))
+    except ValueError:
+        return False
+    return max(w, h) > MONITOR_MAX_SIDE or min(w, h) > 1080
+
+
+def preview_player_command(ffplay_path: str, window_title: str) -> List[str]:
+    """ffplay que muestra en el monitor el video crudo (nut) que le llega por stdin."""
+    return [ffplay_path, "-hide_banner", "-loglevel", "error",
+            "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop",
+            "-f", "nut", "-i", "pipe:0", "-window_title", window_title]
+
 
 class CommandBuilder:
     """Construcción desacoplada y testeable de argumentos de línea de comandos."""
@@ -101,6 +123,12 @@ class CommandBuilder:
         zoom = config.get("zoom")
         if zoom and float(zoom) > 0.0 and float(zoom) != 1.0:
             cmd.append(f"--camera-zoom={zoom}")
+
+        # Monitor decodificado aparte (fuente mayor que Full HD): scrcpy no abre ventana y solo
+        # entrega el video por el pipe; el búfer y el título son de su ventana, así que sobran.
+        if config.get("decoded_monitor") and vcam_pipe:
+            cmd.append("--no-window")
+            return cmd, full_record_path
 
         video_buf = config.get("video_buffer")
         if video_buf is not None:
@@ -263,6 +291,8 @@ class CommandBuilder:
             cmd.extend(["-i", f"video={dev_name}"])
             cmd.extend(["-fflags", "nobuffer", "-flags", "low_delay", "-framedrop"])
 
+            if exceeds_full_hd(size):
+                vf_str = ",".join(([vf_str] if vf_str else []) + [MONITOR_SCALE])
             if vf_str:
                 cmd.extend(["-vf", vf_str])
 

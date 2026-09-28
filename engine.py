@@ -22,7 +22,8 @@ import virtualcam
 from infrastructure.logging.app_logger import GLOBAL_LOGGER
 from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER
 from infrastructure.system.win32_window import GLOBAL_WINDOW_EMBEDDER
-from infrastructure.video.command_builder import CommandBuilder, PREVIEW_HEIGHT, PREVIEW_MAX_FPS
+from infrastructure.video.command_builder import (CommandBuilder, PREVIEW_HEIGHT, PREVIEW_MAX_FPS, MONITOR_SCALE,
+                                                  exceeds_full_hd, preview_player_command)
 from infrastructure.video.device_scanner import DeviceScanner
 from infrastructure.video.stream_manager import StreamManager
 from infrastructure.video.report_service import ReportService
@@ -586,18 +587,30 @@ class CameraEngine:
         self.stream_manager.stop_stream()
 
     def _setup_vcam(self, config: dict, platform_mode: str) -> dict:
-        if not config.get("virtual_cam") or not virtualcam.available():
+        is_pc = platform_mode in ("pc", "webcam", "dshow")
+        # Teléfono por encima de Full HD: scrcpy decodifica por CPU y el monitor se atrasa.
+        # Entonces scrcpy no dibuja ventana y el monitor sale del reparto (GPU, ≤ Full HD).
+        decoded = (platform_mode == "android" and not config.get("no_playback")
+                   and bool(self.ffmpeg_path and self.ffplay_path)
+                   and exceeds_full_hd(config.get("size")))
+        want_vcam = bool(config.get("virtual_cam")) and virtualcam.available()
+        if not want_vcam and not decoded:
             return config
 
-        is_pc = platform_mode in ("pc", "webcam", "dshow")
         size = virtualcam.OUTPUT_SIZE
         # El enlace con el driver lo presta el servicio: si no pudo abrirse, la
         # fuente se muestra igual en el monitor, sin cámara virtual.
-        sink = virtualcam.SERVICE.acquire()
-        if sink is None:
+        sink = virtualcam.SERVICE.acquire() if want_vcam else None
+        if want_vcam and sink is None:
             self.log(f"Cámara virtual no disponible: {virtualcam.SERVICE.last_error or 'motivo desconocido'}", "WARN")
-            return config
+            if not decoded:
+                return config
 
+        preview = None
+        if decoded:
+            preview = {"cmd": preview_player_command(self.ffplay_path, config.get("window_title", "UltraCam_Studio_Monitor")),
+                       "vf": MONITOR_SCALE, "fps": min(int(config.get("fps") or PREVIEW_MAX_FPS), PREVIEW_MAX_FPS)}
+            self.log(f"Monitor reducido a Full HD y decodificado por GPU (la toma queda en {config.get('size')}).", "PROCESS")
         bridge = virtualcam.VirtualCamBridge(
             mode="raw" if is_pc else "encoded",
             width=size[0], height=size[1],
@@ -605,10 +618,11 @@ class CameraEngine:
             ffmpeg_path=self.ffmpeg_path,
             log=self.log,
             sink=sink,
+            preview=preview,
         )
         bridge.start()
         self.stream_manager.vcam = bridge
-        return dict(config, vcam_pipe=bridge.pipe_path, vcam_size=size)
+        return dict(config, vcam_pipe=bridge.pipe_path, vcam_size=size, decoded_monitor=decoded)
 
     def _stop_vcam(self):
         self.stream_manager._cleanup_vcam()
