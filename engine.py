@@ -20,7 +20,7 @@ from typing import Optional, List, Dict, Any, Callable
 import paths
 import virtualcam
 from infrastructure.logging.app_logger import GLOBAL_LOGGER
-from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER
+from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER, bind_to_app
 from infrastructure.system.win32_window import GLOBAL_WINDOW_EMBEDDER
 from infrastructure.video.command_builder import (CommandBuilder, PREVIEW_HEIGHT, PREVIEW_MAX_FPS, MONITOR_SCALE,
                                                   exceeds_full_hd, preview_player_command)
@@ -448,12 +448,12 @@ class CameraEngine:
         ]
         try:
             self.log(f"Abriendo propiedades de hardware DirectShow para '{device_name}'...", "CAM")
-            self.stream_manager.hw_dialog_process = subprocess.Popen(
+            self.stream_manager.hw_dialog_process = bind_to_app(subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
+            ))
             return True
         except Exception as e:
             self.log(f"Error al abrir diálogo DirectShow: {e}", "ERROR")

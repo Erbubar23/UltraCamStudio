@@ -1637,6 +1637,32 @@ class TestSourceSelection(unittest.TestCase):
         self.assertFalse(self.gui.is_own_virtual_camera("UltraCam Test"))
 
 
+@unittest.skipUnless(sys.platform == "win32", "Job Objects de Windows")
+class TestProcessesDieWithApp(unittest.TestCase):
+    def test_bound_process_dies_when_app_exits_abruptly(self):
+        """Un ffplay atado a la app muere aunque ella termine sin detenerlo (os._exit)."""
+        import subprocess
+        app = ("import os, subprocess, sys; sys.path.insert(0, {root!r});"
+               "from infrastructure.system.process_utils import bind_to_app;"
+               "p = bind_to_app(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],"
+               " stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL));"
+               "print(p.pid, flush=True); os._exit(0)").format(root=os.path.dirname(os.path.abspath(__file__)))
+        out = subprocess.run([sys.executable, "-c", app], capture_output=True, text=True, timeout=30)
+        pid = int(out.stdout.split()[0])
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        deadline = time.time() + 5
+        alive = True
+        while alive and time.time() < deadline:
+            h = k32.OpenProcess(0x00100000, False, pid)          # SYNCHRONIZE
+            alive = bool(h) and k32.WaitForSingleObject(h, 0) == 0x102   # WAIT_TIMEOUT: sigue vivo
+            if h:
+                k32.CloseHandle(h)
+            if alive:
+                time.sleep(0.1)
+        self.assertFalse(alive, "el proceso hijo sobrevivió al cierre de la app")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

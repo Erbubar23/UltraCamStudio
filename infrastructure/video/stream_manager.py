@@ -10,7 +10,7 @@ import threading
 import subprocess
 from typing import Optional, Callable, Dict, Any, List
 from infrastructure.logging.app_logger import GLOBAL_LOGGER
-from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER
+from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER, bind_to_app
 from infrastructure.system.win32_window import GLOBAL_WINDOW_EMBEDDER
 from infrastructure.video.command_builder import preview_player_command
 
@@ -57,21 +57,21 @@ class StreamManager:
                 # stdout se lee siempre: scrcpy escribe ahí sus INFO, entre ellos «Texture:», que
                 # sale al decodificar el primer cuadro. El tamaño del .mkv no sirve (el muxer retiene
                 # los datos hasta juntar ~5 MB o 5 s) y «Recording started» sale antes de abrir la cámara.
-                self.process = subprocess.Popen(
+                self.process = bind_to_app(subprocess.Popen(
                     cmd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     creationflags=no_window
-                )
+                ))
                 proc = self.process
 
                 if piped_preview and ffplay_path:
-                    self.preview_process = subprocess.Popen(
+                    self.preview_process = bind_to_app(subprocess.Popen(
                         preview_player_command(ffplay_path, window_title),
                         stdin=proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         creationflags=no_window
-                    )
+                    ))
                     proc.stdout.close()
 
                 self.is_running = True
