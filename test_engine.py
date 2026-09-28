@@ -883,6 +883,16 @@ class TestVirtualCamera(unittest.TestCase):
         self.assertNotIn("--no-window", plain)
         self.assertIn("--window-title=M", plain)
 
+    def test_monitor_window_opens_offscreen(self):
+        """ffplay abre fuera de la pantalla: si la imagen tarda en llegar (vertical al grabar),
+        su ventana no queda suelta en el escritorio antes de incrustarse."""
+        from infrastructure.video.command_builder import preview_player_command
+        cmd = preview_player_command("ffplay", "M")
+        self.assertEqual(cmd[cmd.index("-left") + 1], "-32000")
+        self.assertEqual(cmd[cmd.index("-top") + 1], "-32000")
+        direct = self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "1920x1080", "fps": 30})
+        self.assertIn("-left", direct)
+
     def test_monitor_limited_to_full_hd(self):
         from infrastructure.video.command_builder import exceeds_full_hd
         self.assertTrue(exceeds_full_hd("3840x2160"))
