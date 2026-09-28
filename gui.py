@@ -43,7 +43,7 @@ from presentation.dialogs.welcome_dialog import WelcomeDialog
 from presentation.dialogs.summary_dialog import TakeSummaryDialog
 
 APP_NAME = "UltraCam Studio"
-APP_VERSION = "0.20.2-beta"
+APP_VERSION = "0.20.3-beta"
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878"
 
 ctk.set_appearance_mode("Dark")
@@ -1660,7 +1660,10 @@ class GalaxyCamApp(ctk.CTk):
         threading.Thread(target=self._embed_monitor, args=(gen, title, parent, w, h), daemon=True).start()
 
     def _embed_monitor(self, gen, title, parent, w, h):
-        ok = self.engine.embed_window_into_hwnd(title, parent, w, h, timeout=10.0)
+        # Al grabar en vertical, el teléfono entrega la primera imagen a los ~12 s (su audio
+        # guía llega con otro reloj y scrcpy retiene el video hasta emparejarlos).
+        timeout = 10.0 if self.rec_state == "idle" else 30.0
+        ok = self.engine.embed_window_into_hwnd(title, parent, w, h, timeout=timeout)
         if gen != self.stream_gen:
             return
         if ok:
@@ -1950,7 +1953,7 @@ class GalaxyCamApp(ctk.CTk):
         sm = self.engine.stream_manager
         t0 = time.time()
         first_growth = None
-        while time.time() - t0 < 15:
+        while time.time() - t0 < 25:        # vertical en el teléfono: la imagen llega a los ~12 s
             if gen != self.stream_gen or self.rec_state != "starting":
                 return
             if evt.wait(0.02):

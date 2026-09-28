@@ -28,11 +28,16 @@ def exceeds_full_hd(size) -> bool:
     return max(w, h) > MONITOR_MAX_SIDE or min(w, h) > 1080
 
 
+# ffplay abre su ventana fuera de la pantalla y la interfaz la incrusta en el monitor. Si la
+# imagen tarda (grabación vertical del teléfono: ~12 s), nunca aparece suelta en el escritorio.
+OFFSCREEN_WINDOW = ["-left", "-32000", "-top", "-32000"]
+
+
 def preview_player_command(ffplay_path: str, window_title: str) -> List[str]:
     """ffplay que muestra en el monitor el video crudo (nut) que le llega por stdin."""
     return [ffplay_path, "-hide_banner", "-loglevel", "error",
             "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop",
-            "-f", "nut", "-i", "pipe:0", "-window_title", window_title]
+            "-f", "nut", "-i", "pipe:0", "-window_title", window_title] + OFFSCREEN_WINDOW
 
 
 class CommandBuilder:
@@ -296,7 +301,7 @@ class CommandBuilder:
             if vf_str:
                 cmd.extend(["-vf", vf_str])
 
-            cmd.extend(["-window_title", window_title])
+            cmd.extend(["-window_title", window_title] + OFFSCREEN_WINDOW)
             return cmd, None
 
     @staticmethod
