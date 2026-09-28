@@ -20,6 +20,7 @@ import threading
 import concurrent.futures
 import subprocess
 import datetime
+import webbrowser
 import tkinter.font as tkfont
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Callable, Tuple
@@ -42,13 +43,14 @@ from presentation.dialogs.welcome_dialog import WelcomeDialog
 from presentation.dialogs.summary_dialog import TakeSummaryDialog
 
 APP_NAME = "UltraCam Studio"
-APP_VERSION = "2.1.1-beta"
+APP_VERSION = "0.20.2-beta"
+DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878"
 
 ctk.set_appearance_mode("Dark")
 
 # Paleta, iconos y textos de dominio: una sola fuente, compartida con los diálogos.
 from presentation.theme import (C, ICON, KIND_LABEL, KIND_LONG, ANDROID_RES, PRESETS,  # noqa: E402
-                                PRESET_VALUES, NORM_OPTIONS, fmt_res)
+                                PRESET_VALUES, NORM_OPTIONS, fmt_res, res_tier)
 
 
 def settings_path() -> str:
@@ -435,8 +437,13 @@ class GalaxyCamApp(ctk.CTk):
         head = ctk.CTkFrame(c, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew", padx=22, pady=(18, 0))
         head.grid_columnconfigure(0, weight=1)
-        self.lbl_src_name = ctk.CTkLabel(head, text=t("ui.main.sin_camara"), font=self.F(18, "bold"), text_color=C["text"], anchor="w")
-        self.lbl_src_name.grid(row=0, column=0, sticky="w")
+        name_row = ctk.CTkFrame(head, fg_color="transparent")
+        name_row.grid(row=0, column=0, sticky="w")
+        self.lbl_src_name = ctk.CTkLabel(name_row, text=t("ui.main.sin_camara"), font=self.F(18, "bold"), text_color=C["text"], anchor="w")
+        self.lbl_src_name.pack(side="left")
+        # Modo en que está la cámara (4K, 2K, Full HD… y fps): se ve siempre, sin abrir el panel
+        self.lbl_mode = ctk.CTkLabel(name_row, text="", font=self.F(11, "bold"), height=22, corner_radius=6,
+                                     fg_color=C["accent_bg"], text_color=C["accent_text"])
         self.lbl_src_kind = ctk.CTkLabel(head, text=t("ui.main.elige_una_camara_en_la"), font=self.F(12), text_color=C["muted"], anchor="w")
         self.lbl_src_kind.grid(row=1, column=0, sticky="w")
         self.btn_pause_cam = ctk.CTkButton(head, text=t("pause.button"), width=120, height=32, corner_radius=16, font=self.F(12),
@@ -826,7 +833,10 @@ class GalaxyCamApp(ctk.CTk):
         self.btn_log = ctk.CTkButton(f, text=t("ui.main.registro_y_diagnostico"), height=24, width=160, corner_radius=6,
                                      fg_color=C["panel"], hover_color=C["raised"], text_color=C["text2"], font=self.F(12),
                                      command=self.toggle_log)
-        self.btn_log.grid(row=0, column=3, padx=(0, 10), pady=3)
+        self.btn_log.grid(row=0, column=4, padx=(0, 10), pady=3)
+        ctk.CTkButton(f, text=t("ui.main.invitame_un_cafe"), height=24, width=90, corner_radius=6,
+                      fg_color=C["accent_bg"], hover_color=C["raised"], text_color=C["accent_text"], font=self.F(12),
+                      command=lambda: webbrowser.open(DONATE_URL)).grid(row=0, column=3, padx=(0, 8), pady=3)
 
     # =========================================================================
     # DETECCIÓN UNIFICADA DE CÁMARAS (sin modos de plataforma)
@@ -1243,6 +1253,7 @@ class GalaxyCamApp(ctk.CTk):
             self._update_transport()
             self.lbl_src_name.configure(text=t("ui.main.sin_camara"))
             self.lbl_src_kind.configure(text=t("ui.main.elige_una_camara_en_la"))
+            self._paint_mode_badge()
             return
         self._update_transport()
         self.lbl_src_name.configure(text=s.name)
@@ -1355,7 +1366,19 @@ class GalaxyCamApp(ctk.CTk):
             return self._rotation(s) in (90, 270)       # el teléfono captura ya girado
         return bool(self.fmt_by_src.get(s.id, {}).get("vertical"))
 
+    def _paint_mode_badge(self, s=None):
+        s = s or self._selected()
+        if not s or not s.ready:
+            self.lbl_mode.pack_forget()
+            return
+        _, _, size, fps = self._format_options(s)
+        key = "mode.badge.vertical" if self._is_vertical(s) else "mode.badge"
+        self.lbl_mode.configure(text=f"  {t(key, tier=res_tier(size), fps=fps)}  ")
+        if not self.lbl_mode.winfo_ismapped():
+            self.lbl_mode.pack(side="left", padx=(10, 0))
+
     def _render_orientation(self, s, size):
+        self._paint_mode_badge(s)
         if not s.ready:
             self.fmt_box.grid_remove()
             return
@@ -1771,7 +1794,8 @@ class GalaxyCamApp(ctk.CTk):
             self._restart_preview()
 
     def _after_stream_started(self, cfg):
-        if cfg.get("virtual_cam") and self.engine.vcam:
+        # El reparto también existe sin cámara virtual (monitor de fuentes mayores que Full HD)
+        if cfg.get("virtual_cam") and self.engine.vcam and self.engine.vcam.sink:
             writer = virtualcam.SERVICE.writer
             self._vcam_frames_at_start = writer.frames_in if writer else 0
             self.vcam_state = {"status": "busy", "message": ""}

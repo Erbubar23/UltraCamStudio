@@ -871,6 +871,53 @@ class TestVirtualCamera(unittest.TestCase):
         self.assertFalse(any(a.endswith(".mkv") for a in cmd))
         self.assertIsNone(self.engine.current_recording_file)
 
+    def test_android_decoded_monitor_has_no_scrcpy_window(self):
+        """Por encima de Full HD el monitor sale del reparto: scrcpy solo entrega el video."""
+        cmd = self.engine.build_command({"serial": "X", "size": "3840x2160", "vcam_pipe": self.PIPE,
+                                         "decoded_monitor": True, "video_buffer": 0, "window_title": "M"})
+        self.assertIn("--no-window", cmd)
+        self.assertIn(f"--record={self.PIPE}", cmd)
+        self.assertFalse(any(a.startswith(("--window-title", "--video-buffer")) for a in cmd))
+        # Sin pipe no hay de dónde sacar la imagen: scrcpy conserva su ventana
+        plain = self.engine.build_command({"serial": "X", "decoded_monitor": True, "window_title": "M"})
+        self.assertNotIn("--no-window", plain)
+        self.assertIn("--window-title=M", plain)
+
+    def test_monitor_limited_to_full_hd(self):
+        from infrastructure.video.command_builder import exceeds_full_hd
+        self.assertTrue(exceeds_full_hd("3840x2160"))
+        self.assertTrue(exceeds_full_hd("2560x1440"))
+        self.assertTrue(exceeds_full_hd("2160x3840"))
+        self.assertFalse(exceeds_full_hd("1920x1080"))
+        self.assertFalse(exceeds_full_hd("1080x1920"))
+        self.assertFalse(exceeds_full_hd("auto"))
+        big = self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "3840x2160", "fps": 30})
+        self.assertTrue(any("min(iw,1920)" in a for a in big))
+        small = self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "1920x1080", "fps": 30})
+        self.assertFalse(any("min(iw,1920)" in a for a in small))
+
+    def test_decoded_monitor_bridge_splits_outputs(self):
+        """Monitor por stdout (hacia ffplay) y cámara virtual por su propio pipe."""
+        class Sink:
+            frames_sent = 0
+        bridge = virtualcam.VirtualCamBridge("encoded", 1920, 1080, 30, ffmpeg_path=sys.executable, sink=Sink(),
+                                             preview={"cmd": ["ffplay"], "vf": "scale=1920:1080", "fps": 30})
+        bridge._vc_pipe = MagicMock(path=self.PIPE)
+        cmd = bridge._decoder_cmd()
+        self.assertEqual(cmd[-1], "pipe:1")
+        self.assertIn("nut", cmd)
+        self.assertIn(self.PIPE, cmd)
+        self.assertNotIn("nobuffer+discardcorrupt", cmd)
+
+    def test_mode_badge_tiers(self):
+        from presentation.theme import res_tier
+        self.assertEqual(res_tier("3840x2160"), "4K")
+        self.assertEqual(res_tier("2160x3840"), "4K")
+        self.assertEqual(res_tier("2560x1440"), "2K")
+        self.assertEqual(res_tier("1920x1080"), "Full HD")
+        self.assertEqual(res_tier("1280x960"), "HD")
+        self.assertEqual(res_tier("640x480"), "480p")
+
     def test_vcam_output_is_independent_of_source(self):
         """La cámara virtual siempre recibe 1080p, con franjas si hace falta: cambiar de
         fuente o girarla nunca cambia el formato que ven Zoom, Teams u OBS."""

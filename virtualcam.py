@@ -24,6 +24,9 @@ from winpipes import NamedPipeServer, unique_name
 from infrastructure.video import vcam_driver
 
 DEVICE_NAME = vcam_driver.FRIENDLY_NAME
+# Líneas de «-progress» de ffmpeg: se leen para saber cuándo llega imagen, no se registran.
+PROGRESS_KEYS = ("frame=", "fps=", "stream_", "bitrate=", "total_size=", "out_time",
+                 "dup_frames=", "drop_frames=", "speed=", "progress=")
 OUTPUT_SIZE = (vcam_driver.WIDTH, vcam_driver.HEIGHT)
 
 # Ritmo al que la app alimenta la cámara virtual. 30 cuadros por segundo es lo que
@@ -142,7 +145,9 @@ class VirtualCamBridge:
     """
     Reparte el video a la cámara virtual y/o grabación en archivo local.
     mode="encoded" (Android): el pipe recibe MKV de scrcpy; un ffmpeg lo reparte a
-        grabación (copia directa) y a la cámara virtual (decodificado a NV12).
+        grabación (copia directa), a la cámara virtual (decodificado a NV12) y, si se
+        pide `preview`, al monitor: con fuentes mayores que Full HD scrcpy no dibuja
+        ventana y el mismo decodificador (por GPU) le entrega al monitor la imagen reducida.
     mode="raw" (PC): el pipe recibe cuadros NV12 crudos para la cámara virtual.
 
     El enlace con el driver (`sink`) lo presta el servicio y le sobrevive al
@@ -150,7 +155,8 @@ class VirtualCamBridge:
     """
 
     def __init__(self, mode: str, width: int, height: int, fps: int, ffmpeg_path: Optional[str] = None,
-                 log: Optional[Callable[[str, str], None]] = None, sink=None):
+                 log: Optional[Callable[[str, str], None]] = None, sink=None,
+                 preview: Optional[Dict] = None):
         self.mode = mode
         self.width, self.height = int(width), int(height)
         self.fps = max(1, int(fps or 30))
@@ -159,8 +165,14 @@ class VirtualCamBridge:
         self._log = _guard(log or (lambda m, c="VCAM": print(f"[{c}] {m}")))
         self.pipe_path = unique_name("video")
         self.sink = sink
+        # {"cmd": reproductor que lee nut por stdin, "vf": filtro del monitor, "fps": tope}
+        self.preview = preview
+        self.on_first_frame: Optional[Callable[[], None]] = None
         self._pipe: Optional[NamedPipeServer] = None
+        # Con monitor, la salida estándar es para él y la cámara virtual va por otro pipe.
+        self._vc_pipe: Optional[NamedPipeServer] = None
         self._decoder: Optional[subprocess.Popen] = None
+        self._player: Optional[subprocess.Popen] = None
         self._threads = []
         self._lock = threading.Lock()
         self._stopped = False
@@ -178,6 +190,8 @@ class VirtualCamBridge:
         if self.mode == "encoded" and not self.ffmpeg_path:
             raise RuntimeError("Se necesita ffmpeg para decodificar el video del teléfono.")
         self._pipe = NamedPipeServer(self.pipe_path)
+        if self.mode == "encoded" and self.preview and self.sink:
+            self._vc_pipe = NamedPipeServer(unique_name("vcam"))
         t = threading.Thread(target=self._run, daemon=True)
         t.start()
         self._threads.append(t)
@@ -186,11 +200,11 @@ class VirtualCamBridge:
         if not self._pipe.wait_client() or self._stopped:
             return
         if self.mode == "raw":
-            self._pump_raw()
+            self._pump_raw(self._pipe)
         else:
             self._pump_encoded()
 
-    def _pump_raw(self):
+    def _pump_raw(self, pipe: NamedPipeServer):
         """Lee cuadros NV12 enteros del pipe directamente sobre la memoria del driver.
 
         Sin copias intermedias: el pipe solo guarda un par de cuadros, y si Python
@@ -198,11 +212,11 @@ class VirtualCamBridge:
         (y con ella la grabación) se vuelve lenta.
         """
         if not self.sink:
-            while not self._stopped and self._pipe.read():
+            while not self._stopped and pipe.read():
                 pass
             return
         while not self._stopped:
-            if not self._pipe.read_exact(self.sink.back_buffer()):
+            if not pipe.read_exact(self.sink.back_buffer()):
                 break
             self.sink.publish()
         self.sink.idle()
@@ -210,7 +224,11 @@ class VirtualCamBridge:
     def _decoder_cmd(self) -> list:
         w, h = self.width, self.height
         cmd = [self.ffmpeg_path, "-hide_banner", "-loglevel", "error", "-nostats", "-y",
-               "-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay",
+               # El avance (frame=…) sale por stderr: el primer cuadro marca el inicio de la toma
+               "-progress", "pipe:2", "-stats_period", "0.5",
+               # Sin «nobuffer»: descarta los paquetes leídos al analizar el inicio y se perdía
+               # el primer segundo (hasta el siguiente cuadro clave) en monitor, cámara y grabación.
+               "-fflags", "discardcorrupt", "-flags", "low_delay",
                "-hwaccel", "auto",
                "-probesize", "512k", "-analyzeduration", "0",
                "-f", "matroska", "-i", "pipe:0"]
@@ -223,19 +241,34 @@ class VirtualCamBridge:
             vf = (f"fps={min(self.fps, VCAM_FPS)},"
                   f"scale={w}:{h}:force_original_aspect_ratio=decrease:flags=fast_bilinear,"
                   f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,format=nv12")
-            cmd += ["-map", "0:v", "-vf", vf, "-fps_mode", "passthrough", "-f", "rawvideo", "pipe:1"]
+            out = self._vc_pipe.path if self._vc_pipe else "pipe:1"
+            cmd += ["-map", "0:v", "-vf", vf, "-fps_mode", "passthrough", "-f", "rawvideo", out]
+        if self.preview:
+            # El monitor sale del mismo cuadro ya decodificado: nada se decodifica dos veces.
+            vf = f"fps={self.preview['fps']},{self.preview['vf']}"
+            cmd += ["-map", "0:v", "-vf", vf, "-fps_mode", "passthrough",
+                    "-c:v", "rawvideo", "-pix_fmt", "yuv420p", "-an", "-f", "nut", "pipe:1"]
         return cmd
 
     def _pump_encoded(self):
         no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
             self._decoder = subprocess.Popen(self._decoder_cmd(), stdin=subprocess.PIPE,
-                                             stdout=subprocess.PIPE if self.sink else subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE if self.sink or self.preview else subprocess.DEVNULL,
                                              stderr=subprocess.PIPE, creationflags=no_window)
+            if self.preview:
+                self._player = subprocess.Popen(self.preview["cmd"], stdin=self._decoder.stdout,
+                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                                creationflags=no_window)
+                self._decoder.stdout.close()
         except Exception as e:
             self._log(f"No se pudo iniciar el reparto de video: {e}", "ERROR")
             return
         dec = self._decoder
+
+        def read_vcam_pipe():
+            if self._vc_pipe.wait_client() and not self._stopped:
+                self._pump_raw(self._vc_pipe)
 
         def read_frames():
             sink = self.sink
@@ -251,12 +284,24 @@ class VirtualCamBridge:
                 sink.publish()
 
         def read_errors():
+            started = False
             for raw in iter(dec.stderr.readline, b""):
                 line = raw.decode("utf-8", errors="replace").strip()
-                if line:
-                    self._log(line, "VCAM")
+                if not line:
+                    continue
+                if line.startswith(PROGRESS_KEYS):
+                    if not started and line.startswith("frame=") and line[6:].strip() not in ("", "0"):
+                        started = True
+                        if self.on_first_frame:
+                            self.on_first_frame()
+                    continue
+                self._log(line, "VCAM")
 
-        workers = [read_errors] + ([read_frames] if self.sink else [])
+        workers = [read_errors]
+        if self._vc_pipe:
+            workers.append(read_vcam_pipe)
+        elif self.sink:
+            workers.append(read_frames)
         for fn in workers:
             t = threading.Thread(target=fn, daemon=True)
             t.start()
@@ -286,18 +331,23 @@ class VirtualCamBridge:
                 self._done.wait(timeout + 3)
                 return
             self._stopped = True
-        if self._pipe:
-            self._pipe.unblock()
+        for pipe in (self._pipe, self._vc_pipe):
+            if pipe:
+                pipe.unblock()
         dec = self._decoder
         if dec:
             try:
                 dec.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 dec.kill()
+        player = self._player
+        if player and player.poll() is None:
+            player.kill()
         for t in self._threads:
             t.join(timeout=2.0)
-        if self._pipe:
-            self._pipe.close()
+        for pipe in (self._pipe, self._vc_pipe):
+            if pipe:
+                pipe.close()
         if self.sink:
             self.sink.idle()
         self._done.set()
