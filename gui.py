@@ -43,7 +43,7 @@ from presentation.dialogs.welcome_dialog import WelcomeDialog
 from presentation.dialogs.summary_dialog import TakeSummaryDialog
 
 APP_NAME = "UltraCam Studio"
-APP_VERSION = "0.20.3-beta"
+APP_VERSION = "0.20.4-beta"
 DONATE_URL = "https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878"
 
 ctk.set_appearance_mode("Dark")

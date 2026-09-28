@@ -21,6 +21,7 @@ import subprocess
 from typing import Callable, Optional, Dict
 
 from winpipes import NamedPipeServer, unique_name
+from infrastructure.system.process_utils import bind_to_app
 from infrastructure.video import vcam_driver
 
 DEVICE_NAME = vcam_driver.FRIENDLY_NAME
@@ -253,13 +254,13 @@ class VirtualCamBridge:
     def _pump_encoded(self):
         no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         try:
-            self._decoder = subprocess.Popen(self._decoder_cmd(), stdin=subprocess.PIPE,
+            self._decoder = bind_to_app(subprocess.Popen(self._decoder_cmd(), stdin=subprocess.PIPE,
                                              stdout=subprocess.PIPE if self.sink or self.preview else subprocess.DEVNULL,
-                                             stderr=subprocess.PIPE, creationflags=no_window)
+                                             stderr=subprocess.PIPE, creationflags=no_window))
             if self.preview:
-                self._player = subprocess.Popen(self.preview["cmd"], stdin=self._decoder.stdout,
+                self._player = bind_to_app(subprocess.Popen(self.preview["cmd"], stdin=self._decoder.stdout,
                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                                creationflags=no_window)
+                                                creationflags=no_window))
                 self._decoder.stdout.close()
         except Exception as e:
             self._log(f"No se pudo iniciar el reparto de video: {e}", "ERROR")
