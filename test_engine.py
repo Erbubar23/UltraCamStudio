@@ -440,6 +440,44 @@ class TestUniversalAndReporting(unittest.TestCase):
         self.assertEqual(cams[0]["fps"], [10, 11, 15, 24, 30])
         self.assertEqual(cams[0]["resolution"], "4080x3060")
 
+    @patch("subprocess.run")
+    def test_camera_discovery_high_speed(self, mock_run):
+        """El S23 Ultra da 30 fps en modo normal y 120/240 en alta velocidad (1080p/720p)"""
+        mock_output = (
+            "[server] INFO: List of cameras:\n"
+            "    --camera-id=0    (back, 4080x3060, fps={10, 11, 15, 24, 30}, zoom-range=[0.6, 10])\n"
+            "        - 4080x3060\n"
+            "        - 1920x1080\n"
+            "      High speed capture (--camera-high-speed):\n"
+            "        - 1280x720 (fps={120, 240})\n"
+            "        - 1920x1080 (fps={120, 240})\n"
+            "    --camera-id=1    (front, 4000x3000, fps={10, 15, 24, 30}, zoom-range=[1, 8])\n"
+            "        - 4000x3000\n"
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout=mock_output)
+        cams = self.engine.get_device_cameras("HS_SERIAL")
+        self.assertIn("--list-camera-sizes", mock_run.call_args[0][0])
+        self.assertEqual(cams[0]["high_speed"], {"1280x720": [120, 240], "1920x1080": [120, 240]})
+        self.assertEqual(cams[1]["high_speed"], {})
+
+        from infrastructure.video.command_builder import high_speed_rate, high_speed_sizes_for
+        self.assertEqual(high_speed_rate(cams[0], "1920x1080", 60), 120)
+        self.assertIsNone(high_speed_rate(cams[0], "3840x2160", 60), "4K no tiene alta velocidad")
+        self.assertIsNone(high_speed_rate(cams[0], "1920x1080", 30), "30 fps sale en modo normal")
+        self.assertIsNone(high_speed_rate(cams[1], "1920x1080", 60))
+        self.assertEqual(sorted(high_speed_sizes_for(cams[0], 60)), ["1280x720", "1920x1080"])
+
+    def test_high_speed_command(self):
+        """60 fps por alta velocidad: el sensor a 120 y el teléfono deja pasar 60"""
+        cmd = self.engine.build_command({"camera_id": "0", "size": "1920x1080", "fps": 60, "high_speed_fps": 120})
+        self.assertIn("--camera-high-speed", cmd)
+        self.assertIn("--camera-fps=120", cmd)
+        self.assertIn("--max-fps=60", cmd)
+        normal = self.engine.build_command({"camera_id": "0", "size": "1920x1080", "fps": 30})
+        self.assertIn("--camera-fps=30", normal)
+        self.assertNotIn("--camera-high-speed", normal)
+        self.assertFalse(any(a.startswith("--max-fps") for a in normal))
+
     def test_lens_zoom_in_command(self):
         """El objetivo gran angular (0.6×) viaja como zoom inicial de la cámara principal"""
         cmd = self.engine.build_command({"camera_id": "0", "camera_facing": "back", "zoom": 0.6})
@@ -511,7 +549,7 @@ class TestAudioEngineServer(unittest.TestCase):
         indata[:, 0] = 0.5                      # guitarra en IN 1, nada en IN 2
         out = np.zeros((64, 2), dtype=np.float32)
         srv._process(indata, out, 64)
-        master, posts, peaks, mon = srv.out_q.get_nowait()
+        master, posts, peaks, mon, _ = srv.out_q.get_nowait()
         np.testing.assert_allclose(master[:, 0], 0.5)
         np.testing.assert_allclose(master[:, 1], 0.5)
         np.testing.assert_allclose(out[:, 0], 0.5)     # se escucha en el monitor
@@ -541,7 +579,7 @@ class TestAudioEngineServer(unittest.TestCase):
         indata = np.full((64, 2), 0.25, dtype=np.float32)
         out = np.zeros((64, 2), dtype=np.float32)
         srv._process(indata, out, 64)
-        master, posts, peaks, _ = srv.out_q.get_nowait()
+        master, posts, peaks, _, _ = srv.out_q.get_nowait()
         np.testing.assert_allclose(master[:, 0], 0.25)  # solo «b» suena (a quedó silenciado por el solo)
         self.assertEqual(peaks[0], 0.0)
         srv.rt_channels[1].mute = True
@@ -573,7 +611,7 @@ class TestAudioEngineServer(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             srv.start_recording(d)
             master = np.full((480, 2), 0.1, dtype=np.float32)
-            srv.out_q.put((master, [master, None], [0.1, 0.0], 0.0))
+            srv.out_q.put((master, [master, None], [0.1, 0.0], 0.0, None))
             import threading
             srv.running = True
             t = threading.Thread(target=srv._writer_loop, daemon=True)
@@ -595,6 +633,324 @@ class TestAudioEngineServer(unittest.TestCase):
             open(os.path.join(d, "MiAmp.vst3", "Contents", "x86_64-win", "MiAmp.vst3"), "w").close()
             names = [p["name"] for p in scan_vst3([d]) if p["path"].startswith(d)]
             self.assertEqual(names, ["MiAmp"])   # el .vst3 interno del bundle no se cuenta dos veces
+
+    def test_vst3_bundle_resolves_to_inner_binary(self):
+        """pedalboard en Windows no carga la carpeta de un bundle .vst3 (Amp Locker, Decent
+        Sampler…): hay que pasarle el binario de Contents/x86_64-win."""
+        from vst_probe import plugin_binary
+        with tempfile.TemporaryDirectory() as d:
+            inner = os.path.join(d, "MiSynth.vst3", "Contents", "x86_64-win", "MiSynth.vst3")
+            os.makedirs(os.path.dirname(inner))
+            open(inner, "w").close()
+            self.assertEqual(plugin_binary(os.path.join(d, "MiSynth.vst3")), inner)
+            single = os.path.join(d, "Plano.vst3")
+            open(single, "w").close()
+            self.assertEqual(plugin_binary(single), single)
+
+    def test_probe_cache_skips_known_plugins(self):
+        import vst_probe
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "Synth.vst3")
+            open(p, "w").close()
+            plugins = [{"name": "Synth", "path": p}]
+            cache = {os.path.normcase(p): {"sig": vst_probe._signature(p), "v": vst_probe.CACHE_VERSION,
+                                           "kind": "instrument"}}
+            with patch.object(vst_probe, "_run_batch", side_effect=AssertionError("no debía cargarse")):
+                self.assertFalse(vst_probe.classify(plugins, cache))
+            self.assertEqual(plugins[0]["kind"], "instrument")
+            # Si el plugin cambió (otro tamaño), se vuelve a revisar
+            with open(p, "w") as f:
+                f.write("v2")
+            meta = {"name": "Synth Pro", "vendor": "ACME", "category": "Fx|Reverb", "version": "1.2"}
+            with patch.object(vst_probe, "_run_batch", return_value={p: ("effect", meta)}):
+                self.assertTrue(vst_probe.classify(plugins, cache))
+            self.assertEqual(plugins[0]["kind"], "effect")
+            entry = cache[os.path.normcase(p)]
+            self.assertEqual((entry["vendor"], entry["category"], entry["name"]), ("ACME", "Fx|Reverb", "Synth Pro"))
+            # Una caché de la versión anterior (sin fabricante ni categoría) se vuelve a revisar
+            entry["v"] = 1
+            with patch.object(vst_probe, "_run_batch", return_value={p: ("effect", meta)}) as run:
+                vst_probe.classify(plugins, cache)
+            run.assert_called_once()
+
+    def test_probe_reports_progress(self):
+        """Mientras se revisan los plugins se avisa «3 de 5» (el selector de instrumentos lo muestra)."""
+        import vst_probe
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for n in range(3):
+                p = os.path.join(d, f"P{n}.vst3")
+                open(p, "w").close()
+                paths.append(p)
+
+            def fake_batch(todo, on_done=None):
+                for _ in todo:
+                    on_done()
+                return {p: ("effect", {}) for p in todo}
+            seen = []
+            with patch.object(vst_probe, "_run_batch", side_effect=fake_batch):
+                vst_probe.classify([{"name": "P", "path": p} for p in paths], {},
+                                   progress=lambda done, total: seen.append((done, total)))
+            self.assertEqual(seen, [(1, 3), (2, 3), (3, 3)])
+
+    def test_instrument_groups_and_quick_picks(self):
+        from plugin_library import PluginLibrary, instrument_group
+        self.assertEqual(instrument_group({"category": "Instrument|Piano", "name": "Keys"}), "piano")
+        self.assertEqual(instrument_group({"category": "Instrument|Sampler|Synth", "name": "Kontakt"}), "sampler")
+        self.assertEqual(instrument_group({"category": "Instrument", "name": "Addictive Drums 2"}), "drums")
+        self.assertEqual(instrument_group({"category": "Instrument", "name": "Raro"}), "other")
+        plugins = [{"name": n, "path": rf"C:\VST3\{n}.vst3"} for n in ("Vital", "Keyscape", "Reverb")]
+        probe = {os.path.normcase(r"C:\VST3\Vital.vst3"): {"kind": "instrument", "category": "Instrument|Synth"},
+                 os.path.normcase(r"C:\VST3\Keyscape.vst3"): {"kind": "instrument", "category": "Instrument|Piano"},
+                 os.path.normcase(r"C:\VST3\Reverb.vst3"): {"kind": "effect", "category": "Fx|Reverb"}}
+        lib = PluginLibrary(plugins, probe, {})
+        self.assertEqual([i["name"] for i in lib.instruments()], ["Keyscape", "Vital"])
+        self.assertEqual([i["name"] for i in lib.instruments(group="piano")], ["Keyscape"])
+        self.assertEqual([i["name"] for i in lib.instruments("synth")], ["Vital"])
+        lib.touch_recent(r"C:\VST3\Reverb.vst3")
+        lib.touch_recent(r"C:\VST3\Vital.vst3")
+        self.assertEqual([i["name"] for i in lib.quick(("recent",), "instrument")], ["Vital"])
+
+    def _library(self, org=None):
+        from plugin_library import PluginLibrary
+        plugins = [{"name": n, "path": rf"C:\VST3\{n}.vst3"} for n in ("Vital", "Decent", "Tonocracy", "ValhallaRoom", "Roto")]
+        probe = {
+            os.path.normcase(r"C:\VST3\Vital.vst3"): {"kind": "instrument", "name": "Vital", "vendor": "Vital Audio",
+                                                       "category": "Instrument|Synth"},
+            os.path.normcase(r"C:\VST3\Decent.vst3"): {"kind": "instrument", "name": "DecentSampler",
+                                                        "vendor": "Decidedly", "category": "Instrument|Sampler"},
+            os.path.normcase(r"C:\VST3\Tonocracy.vst3"): {"kind": "effect", "vendor": "TMT", "category": "Fx"},
+            os.path.normcase(r"C:\VST3\ValhallaRoom.vst3"): {"kind": "effect", "vendor": "Valhalla DSP",
+                                                              "category": "Fx|Reverb"},
+            os.path.normcase(r"C:\VST3\Roto.vst3"): {"kind": "error"},
+        }
+        return PluginLibrary(plugins, probe, org if org is not None else {})
+
+    def test_plugin_library_tree_nodes(self):
+        lib = self._library()
+        names = lambda node: [i["name"] for i in lib.in_node(node)]
+        self.assertEqual(names(("kind", "instrument")), ["DecentSampler", "Vital"])
+        self.assertEqual(names(("vendor", "TMT")), ["Tonocracy"])
+        self.assertEqual(names(("cat", "Reverb")), ["ValhallaRoom"])
+        self.assertEqual(names(("cat", "Sintetizador")), ["Vital"])
+        self.assertEqual(names(("errors",)), ["Roto"])
+        self.assertIn("Valhalla DSP", lib.vendors())
+        self.assertEqual(lib.category_names(), ["Reverb", "Sampler", "Sintetizador"])
+
+    def test_plugin_library_search_like_reaper(self):
+        lib = self._library()
+        find = lambda q, node=("all",): [i["name"] for i in lib.search(node, q)]
+        self.assertEqual(find("vital synth"), ["Vital"])                  # varias palabras, cualquier orden
+        self.assertEqual(find("SINTETIZADOR"), ["Vital"])                 # categoría en español, sin mayúsculas
+        self.assertEqual(find("decidedly"), ["DecentSampler"])            # por fabricante
+        self.assertEqual(find("instrumento -sampler"), ["Vital"])         # «-» excluye
+        self.assertEqual(find("valhalla", ("kind", "instrument")), [])    # solo dentro del nodo elegido
+        self.assertEqual(find("distorsion"), [])
+
+    def test_plugin_library_favorites_folders_and_recent(self):
+        org = {}
+        lib = self._library(org)
+        vital = r"C:\VST3\Vital.vst3"
+        self.assertTrue(lib.toggle_favorite(vital))
+        self.assertEqual([i["name"] for i in lib.in_node(("fav",))], ["Vital"])
+        self.assertEqual(lib.new_folder("Sintes"), "Sintes")
+        self.assertIsNone(lib.new_folder("Sintes"))                       # sin carpetas repetidas
+        lib.add_to_folder("Sintes", vital)
+        lib.add_to_folder("Sintes", vital.upper())                        # misma ruta con otras mayúsculas
+        self.assertEqual(len(org["folders"]["Sintes"]), 1)
+        self.assertTrue(lib.rename_folder("Sintes", "Teclados"))
+        self.assertEqual(lib.folders_of(vital), ["Teclados"])
+        for n in ("Vital", "Decent", "Vital"):
+            lib.touch_recent(rf"C:\VST3\{n}.vst3")
+        self.assertEqual([i["name"] for i in lib.in_node(("recent",))], ["Vital", "DecentSampler"])
+        # La organización vive en el dict que se guarda en la configuración
+        lib2 = self._library(org)
+        self.assertTrue(lib2.is_favorite(vital))
+        lib2.remove_from_folder("Teclados", vital)
+        lib2.delete_folder("Teclados")
+        self.assertEqual(org["folders"], {})
+
+    def test_midi_decode(self):
+        from midi_input import decode
+        self.assertEqual(decode(0x90 | (60 << 8) | (100 << 16)), bytes((0x90, 60, 100)))
+        self.assertEqual(decode(0x91 | (60 << 8)), bytes((0x81, 60, 0)))   # Note On vel 0 = Note Off
+        self.assertEqual(decode(0xC2 | (5 << 8)), bytes((0xC2, 5)))        # program change: 1 byte de datos
+        self.assertIsNone(decode(0xF8))                                    # reloj MIDI: se ignora
+        self.assertIsNone(decode(0xFE))                                    # active sensing
+
+    def test_midi_router_filters_by_input_and_channel(self):
+        from midi_input import MidiRouter
+        from audio_server import Channel
+        omni = Channel({"id": "a", "source": {"kind": "instrument"}})
+        ch2 = Channel({"id": "b", "source": {"kind": "instrument"}})
+        other = Channel({"id": "c", "source": {"kind": "instrument"}})
+        r = MidiRouter(lambda m, c: None)
+        r.routes = (("*", 0, omni), ("Teclado", 2, ch2), ("Pads", 0, other))
+        r._on_message("Teclado", bytes((0x90, 60, 100)))     # canal MIDI 1
+        r._on_message("Teclado", bytes((0x91, 64, 100)))     # canal MIDI 2
+        self.assertEqual(len(omni.midi_q), 2)
+        self.assertEqual(list(ch2.midi_q), [bytes((0x91, 64, 100))])
+        self.assertEqual(len(other.midi_q), 0)
+
+    def test_midi_learn_reports_first_note_only(self):
+        """«Toca una tecla para asignar»: la primera nota (no un CC ni un Note Off) dice qué
+        teclado y canal MIDI usar, una sola vez; las notas siguen llegando a los canales."""
+        from midi_input import MidiRouter
+        from audio_server import Channel
+        omni = Channel({"id": "a", "source": {"kind": "instrument"}})
+        r = MidiRouter(lambda m, c: None)
+        r.routes = (("*", 0, omni),)
+        learned = []
+        r.on_learn = lambda dev, mch: learned.append((dev, mch))
+        r.learning = True
+        r._on_message("Pads", bytes((0xB0, 1, 64)))           # perilla: no cuenta
+        r._on_message("Pads", bytes((0x82, 60, 0)))           # Note Off: no cuenta
+        r._on_message("Teclado", bytes((0x92, 60, 100)))      # Note On, canal MIDI 3
+        r._on_message("Pads", bytes((0x90, 36, 100)))
+        self.assertEqual(learned, [("Teclado", 3)])
+        self.assertFalse(r.learning)
+        self.assertEqual(len(omni.midi_q), 4)
+
+    def test_input_meters_measure_every_open_input(self):
+        """Con meter_inputs, cada entrada del dispositivo trae su pico aunque ningún canal la use."""
+        import numpy as np
+        srv = self._server([{"id": "g", "source": {"kind": "main", "ch": [0]}, "mode": "mono", "cols": [0]}])
+        indata = np.zeros((64, 4), dtype=np.float32)
+        indata[:, 2] = 0.5                                     # algo suena en IN 3, sin canal
+        out = np.zeros((64, 2), dtype=np.float32)
+        srv._process(indata, out, 64)
+        self.assertIsNone(srv.out_q.get_nowait()[4])           # apagado: no se mide nada de más
+        srv.meter_inputs = True
+        srv._process(indata, out, 64)
+        np.testing.assert_allclose(srv.out_q.get_nowait()[4], [0.0, 0.0, 0.5, 0.0])
+
+    def test_meter_inputs_reopens_only_when_needed(self):
+        srv = self._server([{"id": "g", "source": {"kind": "main", "ch": [0]}, "mode": "mono", "cols": [0]}])
+        srv.cfg = {"channels": []}
+        srv.apply_config = MagicMock()
+        srv._open_meter_streams = MagicMock()
+        fresh = {"channels": [{"id": "g"}]}
+        srv.device_info = {"n_in": 1, "max_in": 8}
+        srv._set_meter_inputs(True, fresh)
+        srv.apply_config.assert_called_once_with(fresh)        # abre las 8 entradas, con la config al día
+        srv.apply_config.reset_mock()
+        srv.device_info = {"n_in": 8, "max_in": 8}
+        srv._set_meter_inputs(False, fresh)
+        srv.apply_config.assert_not_called()                   # un canal usa la entrada: se cierra después
+        srv.meter_inputs = False
+        srv.device_info = {"n_in": 2, "max_in": 2}
+        srv._set_meter_inputs(True, fresh)
+        srv.apply_config.assert_not_called()                   # ya estaban todas abiertas
+        srv.meter_inputs = False
+        srv.device_info = {"n_in": 1, "max_in": 8}
+        srv.rec_files = {"master": None}
+        srv._open_meter_streams.reset_mock()
+        srv._set_meter_inputs(True, fresh)
+        srv.apply_config.assert_not_called()                   # grabando: nunca se reabre
+        srv._open_meter_streams.assert_not_called()            # ni se abren micrófonos de más
+        self.assertTrue(srv.meter_inputs)
+
+    def test_meter_off_closes_input_nobody_uses(self):
+        """Si se midió el micrófono solo para el diálogo, al cerrarlo no queda abierto."""
+        srv = self._server([{"id": "k", "source": {"kind": "instrument"}}])
+        srv.cfg = {"channels": []}
+        srv.apply_config = MagicMock()
+        srv._open_meter_streams = MagicMock()
+        srv.meter_inputs = True
+        srv.device_info = {"n_in": 2, "max_in": 2}
+        srv._set_meter_inputs(False, None)
+        srv.apply_config.assert_called_once_with(srv.cfg)
+
+    def test_default_channel_names(self):
+        from audio_engine import default_channel_name as name
+        chans = [{"name": "Entrada 1"}]
+        self.assertEqual(name({"kind": "main", "ch": [0]}, chans), "Entrada 1 2")
+        self.assertEqual(name({"kind": "main", "ch": [2]}, chans), "Entrada 3")
+        self.assertEqual(name({"kind": "main", "ch": [0, 1]}, chans), "Entradas 1-2")
+        self.assertEqual(name({"kind": "device", "device": "Altavoces (Realtek(R) Audio)", "loopback": True}, [],
+                              default_out="Altavoces (Realtek(R) Audio)"), "Sonido del PC")
+        self.assertEqual(name({"kind": "device", "device": "Auriculares (USB Headset)", "loopback": True}, [],
+                              default_out="Altavoces"), "Sonido · Auriculares")
+        self.assertEqual(name({"kind": "device", "device": "Micrófono (C505 HD Webcam)", "loopback": False}, []),
+                         "Micrófono")
+        self.assertEqual(name({"kind": "instrument", "path": r"C:\VST3\Vital.vst3"}, []), "Vital")
+        self.assertEqual(name({"kind": "instrument", "path": r"C:\VST3\v.vst3"}, [], label="Keyscape"), "Keyscape")
+
+    def test_add_dialog_input_helpers(self):
+        from modules.audio.ui.add_channel import main_inputs, used_inputs
+        devs = {"asio": [{"name": "Focusrite USB ASIO", "in": 8}], "wasapi_in": [{"name": "Mic", "in": 2}]}
+        self.assertEqual(main_inputs({"driver": "asio", "asio_device": "Focusrite USB ASIO"}, devs),
+                         ("Focusrite USB ASIO", 8))
+        self.assertEqual(main_inputs({"driver": "wasapi", "input_device": "Mic"}, devs), ("Mic", 2))
+        self.assertEqual(main_inputs({"driver": "wasapi", "input_device": "Otro"}, devs), ("Otro", 0))
+        chans = [{"name": "Voz", "source": {"kind": "main", "ch": [0]}},
+                 {"name": "Teclado", "source": {"kind": "main", "ch": [2, 3]}},
+                 {"name": "PC", "source": {"kind": "device"}}]
+        self.assertEqual(used_inputs(chans), {0: "Voz", 2: "Teclado", 3: "Teclado"})
+
+    def test_add_dialog_rows_follow_how_windows_names_inputs(self):
+        """Una interfaz que Windows parte en «IN 1», «IN 2»…: la fila (y el canal) se llaman
+        «IN 2», no «Entrada 1»; con ASIO o un dispositivo de varias entradas, «Entrada N»."""
+        from modules.audio.ui.add_channel import input_rows
+        self.assertEqual(input_rows("IN 2 (2- BEHRINGER UMC 202HD 192k)", 1), [([0], "IN 2", "IN 2")])
+        rows = input_rows("Focusrite USB ASIO", 4)
+        self.assertEqual([r[1] for r in rows], ["Entrada 1", "Entrada 2", "Entrada 3", "Entrada 4",
+                                                "Entradas 1 + 2", "Entradas 3 + 4"])
+        self.assertEqual(rows[4][0], [0, 1])
+        self.assertTrue(all(r[2] is None for r in rows))
+
+    def test_instrument_channel_plays_midi_through_fx(self):
+        """Un canal de instrumento: el MIDI encolado llega al plugin al inicio del bloque
+        y su salida estéreo pasa por la mezcla y el monitor como cualquier canal."""
+        import numpy as np
+
+        class FakeSynth:
+            def __init__(self):
+                self.got = []
+
+            def process(self, msgs, duration, sr, num_channels, buffer_size, reset):
+                self.got.append((list(msgs), round(duration * sr), reset))
+                n = round(duration * sr)
+                on = any(m[0][0] & 0xF0 == 0x90 for m in msgs) or getattr(self, "held", False)
+                self.held = on
+                return np.full((2, n), 0.3 if on else 0.0, dtype=np.float32)
+
+        srv = self._server([{"id": "k", "source": {"kind": "instrument"}, "monitor": True}])
+        ch = srv.rt_channels[0]
+        synth = FakeSynth()
+        ch.inst_plugin = synth
+        ch.midi_push(bytes((0x90, 60, 100)))
+        out = np.zeros((64, 2), dtype=np.float32)
+        srv._process(np.zeros((64, 2), dtype=np.float32), out, 64)
+        master, posts, peaks, _, _ = srv.out_q.get_nowait()
+        self.assertEqual(synth.got[0], ([(bytes((0x90, 60, 100)), 0.0)], 64, False))
+        np.testing.assert_allclose(master, 0.3)
+        np.testing.assert_allclose(out, 0.3)
+        self.assertEqual(len(ch.midi_q), 0)
+        srv._process(None, out, 64)                        # siguiente bloque: sin MIDI nuevo, la nota sigue
+        self.assertEqual(synth.got[1][0], [])
+        self.assertEqual(ch.midi_hits, 1)
+
+    def test_instrument_panic_releases_all_channels(self):
+        from audio_server import Channel
+        ch = Channel({"id": "k", "source": {"kind": "instrument"}})
+        ch.panic()
+        msgs = [m for m, _t in ch.drain_midi()]
+        self.assertIn(bytes((0xB0, 123, 0)), msgs)          # All Notes Off, canal 1
+        self.assertIn(bytes((0xBF, 64, 0)), msgs)           # pedal suelto, canal 16
+        self.assertEqual(len(msgs), 32)
+
+    def test_instrument_state_is_stored_in_source(self):
+        from audio_engine import AudioEngine, new_channel, new_instrument_source, source_label
+        ae = AudioEngine()
+        src = new_instrument_source(r"C:\VST3\Vital.vst3")
+        ch = new_channel("Vital", src, "stereo")
+        ae.config = {"channels": [ch]}
+        ae._store_fx_state(ch["id"], src["id"], "QUJD")
+        self.assertEqual(ch["source"]["state"], "QUJD")
+        self.assertEqual(source_label(src, {}), "🎹 Vital · todo MIDI")
+        src["midi_in"], src["midi_ch"] = "Teclado", 3
+        self.assertEqual(source_label(src, {}), "🎹 Vital · Teclado · canal 3")
 
     def test_migrates_old_fixed_channels(self):
         from types import SimpleNamespace
@@ -647,6 +1003,7 @@ class TestPortableAndObs(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         e = CameraEngine()
         e.ffmpeg_path = sys.executable
+        e._verify_export = lambda *a: (True, "")          # ffmpeg simulado: no hay archivo que verificar
         with tempfile.TemporaryDirectory() as d:
             files = {}
             for n in ("video.mkv", "master.wav", "g.wav", "s.wav"):
@@ -670,6 +1027,7 @@ class TestPostRecordingAndIos(unittest.TestCase):
         self.engine = CameraEngine()
         self.engine.ffmpeg_path = sys.executable
         self.engine.ffplay_path = sys.executable
+        self.engine._verify_export = lambda *a: (True, "")     # ffmpeg simulado: no hay archivo que verificar
 
     def test_ios_devices_discovery(self):
         """Verifica la detección de fuentes de iPhone (DirectShow / Red)"""
@@ -902,9 +1260,21 @@ class TestVirtualCamera(unittest.TestCase):
         self.assertFalse(exceeds_full_hd("1080x1920"))
         self.assertFalse(exceeds_full_hd("auto"))
         big = self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "3840x2160", "fps": 30})
-        self.assertTrue(any("min(iw,1920)" in a for a in big))
+        self.assertTrue(any("min(iw,1280)" in a for a in big))
         small = self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "1920x1080", "fps": 30})
-        self.assertFalse(any("min(iw,1920)" in a for a in small))
+        self.assertFalse(any("min(iw,1280)" in a for a in small))
+
+    def test_monitor_drops_late_frames(self):
+        """El monitor va con reloj externo y sin análisis inicial: tras un tirón descarta los
+        cuadros atrasados en vez de mostrarlos todos a su ritmo (retraso que no se recupera)."""
+        from infrastructure.video.command_builder import preview_player_command
+        for cmd in (preview_player_command("ffplay", "M"),
+                    self.engine.build_pc_camera_command({"pc_device": "Cam", "size": "1920x1080", "fps": 30})):
+            self.assertEqual(cmd[cmd.index("-sync") + 1], "ext")
+            self.assertIn("-framedrop", cmd)
+        piped = preview_player_command("ffplay", "M")
+        self.assertEqual(piped[piped.index("-probesize") + 1], "32")
+        self.assertLess(piped.index("-probesize"), piped.index("-i"))
 
     def test_decoded_monitor_bridge_splits_outputs(self):
         """Monitor por stdout (hacia ffplay) y cámara virtual por su propio pipe."""
@@ -1078,6 +1448,7 @@ class TestUniversalPCCamerasAndControls(unittest.TestCase):
         self.engine = CameraEngine()
         self.engine.ffmpeg_path = sys.executable
         self.engine.ffplay_path = sys.executable
+        self.engine._verify_export = lambda *a: (True, "")     # ffmpeg simulado: no hay archivo que verificar
 
     @patch("subprocess.run")
     def test_pc_camera_discovery_and_categorization(self, mock_run):
@@ -1208,6 +1579,7 @@ class TestRecordingJoin(unittest.TestCase):
     def setUp(self):
         self.engine = CameraEngine()
         self.engine.ffmpeg_path = sys.executable
+        self.engine._verify_export = lambda *a: (True, "")     # ffmpeg simulado: no hay archivo que verificar
         self.dir = tempfile.mkdtemp()
         self.video = os.path.join(self.dir, "v.mkv")
         self.master = os.path.join(self.dir, "m.wav")
@@ -1407,6 +1779,15 @@ class TestAdbHealth(unittest.TestCase):
         self.assertEqual(calls.count(["start-server"]), 1, "solo una vez")
 
 
+def _ui_sources(root):
+    """Archivos de la interfaz: gui.py, el marco (app/), los módulos y presentation/."""
+    names = ["gui.py"]
+    for folder in ("app", "modules", "presentation"):
+        for base, _dirs, files in os.walk(os.path.join(root, folder)):
+            names += [os.path.relpath(os.path.join(base, n), root) for n in files if n.endswith(".py")]
+    return names
+
+
 class TestMessagesAndDisk(unittest.TestCase):
     """Catálogo de textos, avisos sin repeticiones y cálculo de espacio para grabar."""
 
@@ -1416,10 +1797,7 @@ class TestMessagesAndDisk(unittest.TestCase):
         from presentation import strings
         root = os.path.dirname(os.path.abspath(__file__))
         used = set()
-        names = ["gui.py", "settings_window.py", os.path.join("presentation", "theme.py")]
-        dialogs = os.path.join(root, "presentation", "dialogs")
-        names += [os.path.join("presentation", "dialogs", n) for n in os.listdir(dialogs) if n.endswith(".py")]
-        for name in names:
+        for name in _ui_sources(root):
             with open(os.path.join(root, name), encoding="utf-8") as f:
                 used |= set(re.findall(r'\bt\(\s*"([a-z0-9_.]+)"', f.read()))
         self.assertGreater(len(used), 300)
@@ -1431,11 +1809,8 @@ class TestMessagesAndDisk(unittest.TestCase):
         (pasó con Configuración › Video): ninguna función de la interfaz puede usar ese nombre."""
         import ast
         root = os.path.dirname(os.path.abspath(__file__))
-        names = ["gui.py", "settings_window.py"]
-        for folder in (os.path.join("presentation"), os.path.join("presentation", "dialogs")):
-            names += [os.path.join(folder, n) for n in os.listdir(os.path.join(root, folder)) if n.endswith(".py")]
         offenders = []
-        for name in names:
+        for name in _ui_sources(root):
             with open(os.path.join(root, name), encoding="utf-8") as f:
                 tree = ast.parse(f.read())
             for fn in ast.walk(tree):
@@ -1591,18 +1966,49 @@ class TestSourceSelection(unittest.TestCase):
         self.app._stream_jobs.submit.assert_called_once()
         self.app._start_preview.assert_called_once()
 
-    def test_quick_channel_without_source_is_discarded(self):
-        """«+ Canal» y cerrar Configuración sin elegir fuente no deja un canal vacío."""
-        self.app._quick_channel = "ch9"
-        self.app.audio_engine.channel.return_value = {"id": "ch9", "source": {"kind": "none"}, "fx": []}
-        self.gui.GalaxyCamApp._on_settings_closed(self.app)
-        self.app.remove_channel.assert_called_once_with("ch9")
-        # con fuente elegida se conserva
-        self.app.remove_channel.reset_mock()
-        self.app._quick_channel = "ch9"
-        self.app.audio_engine.channel.return_value = {"id": "ch9", "source": {"kind": "main", "ch": [0]}}
-        self.gui.GalaxyCamApp._on_settings_closed(self.app)
-        self.app.remove_channel.assert_not_called()
+    def _channel_app(self):
+        app = self.app
+        app.audio_engine.config = {"channels": [{"id": "x", "name": "Entrada 1", "source": {"kind": "main", "ch": [0]}}]}
+        app.audio_devices = {"default_out": "Altavoces"}
+        app._chord_pending = set()
+        app.add_channel = lambda *a, **k: self.gui.GalaxyCamApp.add_channel(app, *a, **k)
+        return app
+
+    def test_add_channel_picks_name_and_mode(self):
+        """Cada canal nuevo nace con un nombre útil y mono/estéreo según la fuente."""
+        app = self._channel_app()
+        mono = self.gui.GalaxyCamApp.add_channel_from(app, {"kind": "main", "ch": [1]})
+        self.assertEqual((mono["name"], mono["mode"], mono["monitor"]), ("Entrada 2", "mono", False))
+        pair = self.gui.GalaxyCamApp.add_channel_from(app, {"kind": "main", "ch": [2, 3]})
+        self.assertEqual((pair["name"], pair["mode"]), ("Entradas 3-4", "stereo"))
+        pc = self.gui.GalaxyCamApp.add_channel_from(app, {"kind": "device", "device": "Altavoces", "loopback": True})
+        self.assertEqual((pc["name"], pc["mode"]), ("Sonido del PC", "stereo"))
+        self.assertEqual(len(app.audio_engine.config["channels"]), 4)
+        self.assertEqual(app.apply_audio_config.call_count, 3)
+
+    def test_new_instrument_is_ready_to_play(self):
+        """Instrumento nuevo: monitor encendido, cualquier teclado MIDI y un acorde al cargar."""
+        app = self._channel_app()
+        ch = self.gui.GalaxyCamApp.add_instrument_channel(app, r"C:\VST3\vital.vst3", "Vital")
+        self.assertEqual((ch["name"], ch["mode"], ch["monitor"]), ("Vital", "stereo", True))
+        self.assertEqual((ch["source"]["midi_in"], ch["source"]["midi_ch"]), ("*", 0))
+        self.assertIn(ch["id"], app._chord_pending)
+        app.audio_engine.inst_status = {}
+        self.gui.GalaxyCamApp._after_audio_applied(app)          # todavía cargando
+        app.audio_engine.test_chord.assert_not_called()
+        app.audio_engine.inst_status = {ch["id"]: {"name": "Vital", "error": None}}
+        self.gui.GalaxyCamApp._after_audio_applied(app)
+        app.audio_engine.test_chord.assert_called_once_with(ch["id"])
+        self.gui.GalaxyCamApp._after_audio_applied(app)          # una sola vez
+        app.audio_engine.test_chord.assert_called_once()
+
+    def test_failed_instrument_does_not_play(self):
+        app = self._channel_app()
+        ch = self.gui.GalaxyCamApp.add_instrument_channel(app, r"C:\VST3\roto.vst3")
+        app.audio_engine.inst_status = {ch["id"]: {"name": "Roto", "error": "no carga"}}
+        self.gui.GalaxyCamApp._after_audio_applied(app)
+        app.audio_engine.test_chord.assert_not_called()
+        self.assertEqual(app._chord_pending, set())
 
     def test_vertical_size(self):
         self.assertEqual(self.gui.vertical_size("1920x1080", "crop"), (606, 1080))
@@ -1635,6 +2041,32 @@ class TestSourceSelection(unittest.TestCase):
         self.assertTrue(self.gui.is_own_virtual_camera(" ultracam "))
         self.assertFalse(self.gui.is_own_virtual_camera("OBS Virtual Camera"))
         self.assertFalse(self.gui.is_own_virtual_camera("UltraCam Test"))
+
+
+@unittest.skipUnless(sys.platform == "win32", "Job Objects de Windows")
+class TestProcessesDieWithApp(unittest.TestCase):
+    def test_bound_process_dies_when_app_exits_abruptly(self):
+        """Un ffplay atado a la app muere aunque ella termine sin detenerlo (os._exit)."""
+        import subprocess
+        app = ("import os, subprocess, sys; sys.path.insert(0, {root!r});"
+               "from infrastructure.system.process_utils import bind_to_app;"
+               "p = bind_to_app(subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],"
+               " stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL));"
+               "print(p.pid, flush=True); os._exit(0)").format(root=os.path.dirname(os.path.abspath(__file__)))
+        out = subprocess.run([sys.executable, "-c", app], capture_output=True, text=True, timeout=30)
+        pid = int(out.stdout.split()[0])
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        deadline = time.time() + 5
+        alive = True
+        while alive and time.time() < deadline:
+            h = k32.OpenProcess(0x00100000, False, pid)          # SYNCHRONIZE
+            alive = bool(h) and k32.WaitForSingleObject(h, 0) == 0x102   # WAIT_TIMEOUT: sigue vivo
+            if h:
+                k32.CloseHandle(h)
+            if alive:
+                time.sleep(0.1)
+        self.assertFalse(alive, "el proceso hijo sobrevivió al cierre de la app")
 
 
 if __name__ == "__main__":

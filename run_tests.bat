@@ -6,4 +6,7 @@ echo ===================================================
 echo.
 py test_engine.py
 echo.
+echo --- Modulos (tests/) ---
+py -m unittest discover -s tests -t .
+echo.
 pause

@@ -27,5 +27,6 @@ Se descargan durante `packaging/build.ps1` y se ejecutan como procesos aparte.
 |---|---|---|
 | [FFmpeg](https://ffmpeg.org) (build `gpl-shared` de BtbN) | GPLv3 | https://github.com/BtbN/FFmpeg-Builds · https://ffmpeg.org/download.html |
 | [scrcpy](https://github.com/Genymobile/scrcpy) (incluye adb) | Apache 2.0 | https://github.com/Genymobile/scrcpy |
+| [MediaMTX](https://github.com/bluenviron/mediamtx) (reparte la transmisión a cada plataforma) | MIT | https://github.com/bluenviron/mediamtx |
 
-Los textos de licencia de FFmpeg y scrcpy van en `bin/ffmpeg/LICENSE.txt` y `bin/scrcpy/LICENSE.txt` dentro del paquete.
+Los textos de licencia de FFmpeg, scrcpy y MediaMTX van en `bin/ffmpeg/LICENSE.txt`, `bin/scrcpy/LICENSE.txt` y `bin/mediamtx/LICENSE` dentro del paquete.

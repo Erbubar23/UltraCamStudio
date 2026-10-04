@@ -2,7 +2,7 @@
 ; Lo compila packaging\build_installer.ps1; no hace falta abrirlo a mano.
 
 #ifndef AppVersion
-  #define AppVersion "0.20.3-beta"
+  #define AppVersion "0.21.0-beta"
 #endif
 #define AppName "UltraCam Studio"
 #define AppExe "UltraCamStudio.exe"

@@ -15,15 +15,16 @@ import tempfile
 import json
 import re
 import wave
-from typing import Optional, List, Dict, Any, Callable
+import threading
+from typing import Optional, List, Dict, Any, Callable, Tuple
 
 import paths
 import virtualcam
 from infrastructure.logging.app_logger import GLOBAL_LOGGER
-from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER
+from infrastructure.system.process_utils import GLOBAL_PROCESS_MANAGER, bind_to_app
 from infrastructure.system.win32_window import GLOBAL_WINDOW_EMBEDDER
 from infrastructure.video.command_builder import (CommandBuilder, PREVIEW_HEIGHT, PREVIEW_MAX_FPS, MONITOR_SCALE,
-                                                  exceeds_full_hd, preview_player_command)
+                                                  exceeds_full_hd, preview_player_command, high_speed_sizes)
 from infrastructure.video.device_scanner import DeviceScanner
 from infrastructure.video.stream_manager import StreamManager
 from infrastructure.video.report_service import ReportService
@@ -38,6 +39,39 @@ HW_ENCODERS = [
     ("h264_mf", ["-hw_encoding", "true", "-rate_control", "quality", "-quality", "70"]),
 ]
 CPU_ENCODER = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18"]
+
+
+def parse_media_info(ffmpeg_stderr: str, size_bytes: int = 0) -> Dict[str, Any]:
+    """Lee de la salida de «ffmpeg -i» el primer video (códec, tamaño), la duración, el bitrate
+    del video (estimado si el contenedor no lo dice) y cuántas pistas de audio hay."""
+    info: Dict[str, Any] = {"codec": None, "width": None, "height": None, "duration": None, "bitrate": None,
+                            "audio_streams": 0}
+    m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", ffmpeg_stderr)
+    if m:
+        info["duration"] = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    for line in ffmpeg_stderr.splitlines():
+        if "Stream #" not in line:
+            continue
+        if ": Video:" in line and info["codec"] is None:
+            c = re.search(r"Video: (\w+)", line)
+            info["codec"] = c.group(1) if c else None
+            wh = re.search(r"\b(\d{2,5})x(\d{2,5})\b", line)
+            if wh:
+                info["width"], info["height"] = int(wh.group(1)), int(wh.group(2))
+            br = re.search(r"(\d+) kb/s", line)
+            if br:
+                info["bitrate"] = int(br.group(1)) * 1000
+        elif ": Audio:" in line:
+            info["audio_streams"] += 1
+    if info["bitrate"] is None and info["duration"] and size_bytes:
+        info["bitrate"] = size_bytes * 8 / info["duration"]
+    return info
+
+
+def last_frames(ffmpeg_stderr: str) -> Optional[int]:
+    """El último «frame=N» de las estadísticas de ffmpeg (cuántos cuadros escribió)."""
+    found = re.findall(r"frame=\s*(\d+)", ffmpeg_stderr or "")
+    return int(found[-1]) if found else None
 
 
 class CameraEngine:
@@ -369,16 +403,21 @@ class CameraEngine:
             cmd = [self.scrcpy_path, "--video-source=camera"]
             if serial:
                 cmd.extend(["-s", serial])
-            cmd.append("--list-cameras")
+            # Con los tamaños, scrcpy también lista la «captura de alta velocidad» (120/240 fps):
+            # en muchos teléfonos (Samsung) es la única forma de pasar de 30 fps.
+            cmd.append("--list-camera-sizes")
 
             res = subprocess.run(cmd, capture_output=True, text=True,
-                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0, timeout=6)
-            matches = re.findall(r"--camera-id=(\d+)\s*\((back|front|external)(?:,\s*(\d+x\d+))?([^)\n]*)", res.stdout)
-            if not matches:
+                                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0, timeout=10)
+            head = re.compile(r"--camera-id=(\d+)\s*\((back|front|external)(?:,\s*(\d+x\d+))?([^)\n]*)")
+            heads = list(head.finditer(res.stdout))
+            if not heads:
                 return self._default_camera_options()
 
             cameras = []
-            for cam_id, facing, res_size, rest in matches:
+            for k, m in enumerate(heads):
+                cam_id, facing, res_size, rest = m.groups()
+                block = res.stdout[m.end():heads[k + 1].start() if k + 1 < len(heads) else len(res.stdout)]
                 icon = "📷" if facing == "back" else "🤳"
                 orient = "Trasera" if facing == "back" else "Frontal"
                 size_str = f" - {res_size}" if res_size else ""
@@ -397,6 +436,7 @@ class CameraEngine:
                 zoom = re.search(r"zoom-range=\[([\d.]+),\s*([\d.]+)\]", rest)
                 if zoom:
                     cam["zoom_min"], cam["zoom_max"] = float(zoom.group(1)), float(zoom.group(2))
+                cam["high_speed"] = high_speed_sizes(block)
                 cameras.append(cam)
 
             if serial:
@@ -448,12 +488,12 @@ class CameraEngine:
         ]
         try:
             self.log(f"Abriendo propiedades de hardware DirectShow para '{device_name}'...", "CAM")
-            self.stream_manager.hw_dialog_process = subprocess.Popen(
+            self.stream_manager.hw_dialog_process = bind_to_app(subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
+            ))
             return True
         except Exception as e:
             self.log(f"Error al abrir diálogo DirectShow: {e}", "ERROR")
@@ -655,15 +695,126 @@ class CameraEngine:
         except (OSError, wave.Error, EOFError):
             return 48000
 
+    def probe_media(self, path: str) -> Dict[str, Any]:
+        """Códec, tamaño, duración y bitrate del primer video de un archivo (solo lee el
+        encabezado). Lo que no se pueda leer queda en None."""
+        info: Dict[str, Any] = {"codec": None, "width": None, "height": None, "duration": None, "bitrate": None,
+                                "audio_streams": 0}
+        if not self.ffmpeg_path or not path or not os.path.exists(path):
+            return info
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        try:
+            res = subprocess.run([self.ffmpeg_path, "-hide_banner", "-i", path], capture_output=True, text=True,
+                                 errors="replace", timeout=20, creationflags=no_window)
+        except Exception:
+            return info
+        return parse_media_info(res.stderr or "", os.path.getsize(path))
+
+    def cancel_export(self):
+        """Corta el guardado en curso (al cerrar la app a mitad): los originales se conservan."""
+        proc = getattr(self, "_export_proc", None)
+        if proc is not None and proc.poll() is None:
+            GLOBAL_PROCESS_MANAGER.kill_process_tree(proc)
+
+    def _run_export(self, cmd: List[str], progress: Optional[Callable], duration: Optional[float],
+                    min_speed: Optional[float]) -> Dict[str, Any]:
+        """Ejecuta ffmpeg. Sin `progress`, igual que siempre (subprocess.run). Con `progress`,
+        avisa del avance y, si `min_speed`, corta cuando va más lento que eso (×tiempo real)
+        después de unos segundos: comprimir no debe tener la PC ocupada más que la toma."""
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        if progress is None:
+            res = subprocess.run(cmd, capture_output=True, text=True, creationflags=no_window)
+            return {"returncode": res.returncode, "stderr": res.stderr or "", "slow": False,
+                    "frames": last_frames(res.stderr or "")}
+        full = cmd[:1] + ["-progress", "pipe:1", "-nostats"] + cmd[1:]
+        proc = bind_to_app(subprocess.Popen(full, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                            errors="replace", creationflags=no_window))
+        self._export_proc = proc
+        tail: List[str] = []
+
+        def read_err():
+            for line in proc.stderr:
+                tail.append(line)
+                del tail[:-200]
+        t_err = threading.Thread(target=read_err, daemon=True)
+        t_err.start()
+        t0, slow, speed, out_s, frames = time.monotonic(), False, None, 0.0, None
+        for line in proc.stdout:
+            key, _, val = line.strip().partition("=")
+            if key == "out_time_us" and val.isdigit():
+                out_s = int(val) / 1e6
+            elif key == "frame" and val.isdigit():
+                frames = int(val)
+            elif key == "speed" and val.endswith("x"):
+                try:
+                    speed = float(val[:-1])
+                except ValueError:
+                    pass
+            elif key == "progress":
+                elapsed = time.monotonic() - t0
+                if min_speed and elapsed > 12 and speed is not None and speed < min_speed:
+                    slow = True
+                    GLOBAL_PROCESS_MANAGER.kill_process_tree(proc)
+                    break
+                frac = min(1.0, out_s / duration) if duration else None
+                eta = (duration - out_s) / speed if duration and speed else None
+                try:
+                    progress(frac, speed, eta)
+                except Exception:
+                    pass
+        code = proc.wait()
+        t_err.join(timeout=2)
+        self._export_proc = None
+        return {"returncode": code, "stderr": "".join(tail), "slow": slow, "frames": frames}
+
+    def _verify_export(self, path: str, n_audio: int, frames_written: Optional[int]) -> Tuple[bool, str]:
+        """¿El archivo nuevo está completo? Se lee entero (sin decodificar): debe abrirse, tener
+        el video, todas las pistas de audio y los cuadros que ffmpeg dijo escribir. Recién así
+        se borran los originales. (No se compara la duración total: el audio puede durar unos
+        segundos más que el video y no es un error.)"""
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            return False, "el archivo no se creó"
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        res = subprocess.run([self.ffmpeg_path, "-hide_banner", "-stats", "-i", path, "-map", "0",
+                              "-c", "copy", "-f", "null", "-"], capture_output=True, text=True, errors="replace",
+                             creationflags=no_window)
+        err = res.stderr or ""
+        if res.returncode != 0:
+            return False, f"no se puede leer completo ({err.strip()[-200:]})"
+        info = parse_media_info(err, os.path.getsize(path))
+        if not info["codec"]:
+            return False, "no tiene video"
+        if info["audio_streams"] < n_audio:
+            return False, f"le faltan pistas de audio ({info['audio_streams']} de {n_audio})"
+        read = last_frames(err)
+        if frames_written and read is not None and abs(read - frames_written) > 2:
+            return False, f"tiene {read} cuadros de {frames_written}"
+        return True, ""
+
     def post_process_session(self, video_path: str, audio_info: dict, options: dict) -> Dict[str, Any]:
+        """Une video y audio en el MP4 final (alineados) y, si se pide (`video_args`), comprime
+        el video en el mismo paso. Se escribe a un «.part»; solo si se verifica completo pasa a
+        ser el MP4 y se borran los originales. Si comprimir falla, va lento o no ahorra espacio,
+        se guarda como siempre (copiando el video). Opciones nuevas:
+          video_args: argumentos del codificador (None: copiar, como siempre)
+          progress(paso, fracción, velocidad, segundos_restantes): avance para la barra de guardado
+          timestamp: hora de la toma para el nombre (al recuperar una toma, la original)"""
         if not self.ffmpeg_path or not os.path.exists(self.ffmpeg_path):
             return {"success": False, "error": "ffmpeg_missing", "message": "FFmpeg no encontrado."}
 
         out_dir = options.get("output_dir", os.path.join(os.path.expanduser("~"), "Videos", "GalaxyCam"))
         os.makedirs(out_dir, exist_ok=True)
+        report = options.get("progress")
+
+        def step(name, frac=None, speed=None, eta=None):
+            if report:
+                try:
+                    report(name, frac, speed, eta)
+                except Exception:
+                    pass
 
         prefix = options.get("prefix", "UltraCam_Session")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = options.get("timestamp") or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         res_tag = options.get("resolution_tag", "4K")
         final_filename = f"{prefix}_{timestamp}_{res_tag}.mp4"
         final_mp4_path = os.path.join(out_dir, final_filename)
@@ -687,6 +838,8 @@ class CameraEngine:
         offset = float(options.get("av_offset_s") or 0.0)
         video_shift, drift = 0.0, 0.0
         refs = [w for w in [master_wav] + [w for w, _ in channel_tracks] if w and os.path.exists(w)]
+        if options.get("guide_sync", True) and refs:
+            step("sync")
         sync = (self._guide_sync(video_path, refs, options.get("phone_serial"))
                 if options.get("guide_sync", True) and refs else None)
         if sync:
@@ -724,50 +877,105 @@ class CameraEngine:
                 cmd.extend(["-ss", f"{-offset:.3f}"])         # empezó antes: se recorta su comienzo
             cmd.extend(["-i", wav])
 
-        cmd.extend(["-map", "0:v:0"])
+        maps = ["-map", "0:v:0"]
         for i, (_, title) in enumerate(audio_tracks_to_add, start=1):
-            cmd.extend(["-map", f"{i}:a:0", f"-metadata:s:a:{i-1}", f"title={title}"])
+            maps.extend(["-map", f"{i}:a:0", f"-metadata:s:a:{i-1}", f"title={title}"])
 
-        cmd.extend(["-c:v", "copy", "-c:a", "aac", "-b:a", "320k", "-ar", "48000"])
         # La normalización es para publicar: va solo en la mezcla final (pista 1). Las pistas por
         # canal quedan tal cual para editar; además, loudnorm sobre una pista en silencio hacía
         # fallar al codificador AAC y se perdía la toma entera.
         norm_filter = {"ebu_r128": "loudnorm=I=-14:TP=-1.0:LRA=11",
                        "peak": "alimiter=limit=0.891:level=disabled"}.get(normalize)   # techo de −1 dBFS
         has_master = bool(audio_tracks_to_add) and audio_tracks_to_add[0][0] == master_wav
-        plain_cmd = list(cmd)
-        for i in range(len(audio_tracks_to_add)):
-            chain = [drift_filter] if drift_filter else []
-            plain_cmd.extend(["-filter:a:" + str(i), ",".join(chain)] if chain else [])
-            if i == 0 and norm_filter and has_master:
-                chain.append(norm_filter)
-            if chain:
-                cmd.extend([f"-filter:a:{i}", ",".join(chain)])
-        plain_cmd.append(final_mp4_path)
-        cmd.append(final_mp4_path)
+        part_path = final_mp4_path + ".part"
+
+        def build(video_args, with_norm):
+            """Mismo comando de siempre; comprimir solo cambia «-c:v copy» por el codificador.
+            Las marcas de tiempo pasan tal cual (passthrough): la sincronía no cambia."""
+            c = list(cmd)
+            if video_args:
+                c[2:2] = ["-hwaccel", "auto"]          # decodifica con la GPU si puede (va antes del video)
+            c += maps
+            if video_args:
+                c += list(video_args) + ["-fps_mode", "passthrough", "-enc_time_base", "demux"]
+            else:
+                c += ["-c:v", "copy"]
+            c += ["-c:a", "aac", "-b:a", "320k", "-ar", "48000"]
+            for i in range(len(audio_tracks_to_add)):
+                chain = [drift_filter] if drift_filter else []
+                if with_norm and i == 0 and norm_filter and has_master:
+                    chain.append(norm_filter)
+                if chain:
+                    c += [f"-filter:a:{i}", ",".join(chain)]
+            return c + ["-f", "mp4", part_path]
+
+        def drop_part():
+            try:
+                if os.path.exists(part_path):
+                    os.remove(part_path)               # nada de MP4 a medias en la carpeta
+            except OSError:
+                pass
+
+        src = options.get("source_info") or {}
+        duration = src.get("duration") or audio_info.get("duration")
+        src_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
+        video_args = list(options.get("video_args") or []) or None
+        attempts = ([(video_args, True), (video_args, False)] if video_args else []) + [(None, True), (None, False)]
 
         self.log(f"Multiplexando post-grabación con FFmpeg (audio desplazado {offset:+.3f} s)...", "REC")
         t0 = time.perf_counter()
-        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        res = subprocess.run(cmd, capture_output=True, text=True, creationflags=no_window)
-        if res.returncode != 0 and plain_cmd != cmd:
-            # Sin normalizar, antes que perder la toma.
-            self.log(f"La normalización falló; se guarda sin normalizar. {res.stderr[-600:]}", "WARN")
-            res = subprocess.run(plain_cmd, capture_output=True, text=True, creationflags=no_window)
+        tried, ok, res, used_args, compress = [], False, None, None, bool(video_args)
+        for vargs, with_norm in attempts:
+            c = build(vargs, with_norm)
+            if c in tried or (vargs and not compress):
+                continue
+            tried.append(c)
+            name = "encode" if vargs else "join"
+            step(name, 0.0)
+            res = self._run_export(c, (lambda f, s, e, n=name: step(n, f, s, e)) if report else None,
+                                   duration, options.get("min_speed", 0.8) if vargs else None)
+            if res["slow"]:
+                self.log("Comprimir iba más lento que la toma: se guarda sin comprimir.", "WARN")
+                compress = False
+                drop_part()
+                continue
+            if res["returncode"] != 0:
+                if with_norm and norm_filter:
+                    # Sin normalizar, antes que perder la toma.
+                    self.log(f"La normalización falló; se guarda sin normalizar. {res['stderr'][-600:]}", "WARN")
+                elif vargs:
+                    self.log(f"No se pudo comprimir; se guarda sin comprimir. {res['stderr'][-600:]}", "WARN")
+                    compress = False
+                drop_part()
+                continue
+            step("verify")
+            good, why = self._verify_export(part_path, len(audio_tracks_to_add), res.get("frames"))
+            if good and vargs and src_size and os.path.exists(part_path) and os.path.getsize(part_path) >= 0.9 * src_size:
+                good, why = False, "comprimido no ahorraba espacio"
+            if good:
+                ok, used_args = True, vargs
+                break
+            self.log(f"El archivo final no pasó la verificación ({why}).", "WARN")
+            drop_part()
+            if vargs:
+                compress = False
+            else:
+                break
         t_duration = round(time.perf_counter() - t0, 2)
 
-        if res.returncode != 0:
+        if not ok:
             # El final del error es lo que explica el fallo (el principio es la versión de ffmpeg).
-            self.log(f"Error en multiplexado FFmpeg: {res.stderr[-1500:]}", "ERROR")
-            try:
-                if os.path.exists(final_mp4_path):
-                    os.remove(final_mp4_path)          # nada de MP4 a medias en la carpeta
-            except OSError:
-                pass
-            return {"success": False, "error": "ffmpeg_failed", "message": res.stderr}
+            msg = res["stderr"] if res else "No se intentó unir"
+            self.log(f"Error en multiplexado FFmpeg: {msg[-1500:]}", "ERROR")
+            drop_part()
+            return {"success": False, "error": "ffmpeg_failed", "message": msg}
 
+        if os.path.exists(part_path):
+            os.replace(part_path, final_mp4_path)
         file_size_mb = round(os.path.getsize(final_mp4_path) / (1024 * 1024), 2) if os.path.exists(final_mp4_path) else 0.0
-        self.log(f"✅ Video exportado con éxito en {t_duration}s: {final_mp4_path} ({file_size_mb} MB)", "REC")
+        how = f"comprimido con {used_args[1]}" if used_args else "sin recomprimir"
+        self.log(f"✅ Video exportado con éxito en {t_duration}s ({how}): {final_mp4_path} ({file_size_mb} MB)", "REC")
+        step("done", 1.0)
 
         stems_dir = None
         if export_stems and channel_tracks:
@@ -808,6 +1016,8 @@ class CameraEngine:
             "final_path": final_mp4_path,
             "file_size_mb": file_size_mb,
             "render_time_s": t_duration,
+            "compressed": bool(used_args),
+            "original_size_mb": round(src_size / (1024 * 1024), 2),
             "stems_dir": stems_dir,
             "tracks": [{"name": title} for wav, title in audio_tracks_to_add if wav != master_wav],
             "message": f"Video renderizado exitosamente en {t_duration}s"
