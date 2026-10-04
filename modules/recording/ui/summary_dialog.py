@@ -3,10 +3,9 @@ Diálogo de resumen tras finalizar una grabación de video y audio.
 """
 
 import os
-from typing import Dict, Any, Callable, Optional, List
+from typing import Dict, Any, Callable
 import customtkinter as ctk
 from presentation.theme import C, ICON, ghost_button, outline_button
-from infrastructure.logging.app_logger import GLOBAL_LOGGER
 from presentation.strings import t
 
 

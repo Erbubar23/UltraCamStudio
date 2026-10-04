@@ -54,6 +54,12 @@ ICON: Dict[str, str] = {
     "copy": "",
     "settings": "",
     "virtual": "",
+    "record": "",
+    "live": "",
+    "info": "",
+    "chevron": "",
+    "mic": "",
+    "power": "",
 }
 
 KIND_LABEL: Dict[str, str] = {

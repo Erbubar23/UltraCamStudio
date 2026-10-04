@@ -12,7 +12,9 @@ Suite de producción audiovisual y streaming nativa para Windows, compatible con
   - **Capturadoras HDMI**: Elgato Cam Link 4K, EVGA XR1, dongles USB3 para cámaras DSLR y Mirrorless (Sony, Canon, Nikon, Fujifilm).
   - **Cámaras Integradas**: Cámaras de laptops y todo-en-uno.
   - **Cámaras Virtuales**: OBS Virtual Camera, vMix, etc.
-  - **Móviles**: Android 4K 60fps vía scrcpy y iPhone vía DirectShow / Red.
+  - **Móviles**: Android por cable vía scrcpy (hasta 4K, o 60 fps reales en 1080p con el modo de alta velocidad de la cámara) e iPhone por Wi-Fi o cable con DroidCam, Camo o Iriun. Con el iPhone conectado por USB la app lo detecta y explica qué falta (app intermedia y controlador «Dispositivos Apple»).
+- **Gestión de cámaras más clara**: el panel Cámaras muestra la lista de fuentes; al elegir una se abren sus ajustes en tarjetas (Formato, Orientación, Cámara) con un botón para volver a la lista.
+- **Monitor fluido**: la vista previa usa una copia ligera de la imagen con la mínima memoria intermedia, para verla casi sin retraso sin afectar la calidad de lo que se graba.
 - **Sondeo Inteligente de Capacidades**: Consulta las resoluciones y tasas de cuadros reales de cada sensor (`probe_camera_capabilities`) y prioriza códec `MJPEG` para desbloquear 30 o 60 FPS estables sin saturar el bus USB 2.0.
 - **Monitor 100% Integrado (Cero Popups)**: Cualquier cámara se visualiza incrustada dentro del marco de la aplicación mediante reparenting nativo Win32 (`SetParent`).
 
@@ -30,6 +32,8 @@ Suite de producción audiovisual y streaming nativa para Windows, compatible con
 - **Dispositivo principal ASIO o Windows Audio**: con ASIO (p. ej. Behringer UMC) la latencia ida y vuelta baja a ~10 ms (búfer 128). Frecuencia, búfer, latencia calculada, carga de CPU y cortes a la vista; acceso al panel del driver ASIO.
 - **Canales libres**: agrega los que necesites. Cada canal toma una entrada del dispositivo principal, otro dispositivo de Windows o «lo que suena» en una salida (loopback), con mono/estéreo, volumen, M, S y vúmetro.
 - **Efectos VST3 por canal**: carga plugins como Tonocracy dentro de UltraCam, abre su ventana y el preset se guarda solo. El audio y los plugins corren en un proceso aparte: si un plugin falla, la app sigue abierta.
+- **Instrumentos VST3 con MIDI**: un canal puede ser un sintetizador o sampler VST3 (Vital, Decent Sampler, Kontakt…) que tocas con un teclado o controlador MIDI. Eliges la entrada MIDI (o todas) y el canal MIDI (Omni o 1–16) para tocar varios instrumentos a la vez; pedal, pitch bend, rueda de modulación y perillas (CC) llegan al instrumento. Sin drivers ni programas extra (MIDI de Windows).
+- **Explorador de plugins (como el de Reaper)**: árbol con Todos, Favoritos, Recientes, Instrumentos, Efectos, por Fabricante, por Categoría y carpetas propias; búsqueda mientras escribes (varias palabras, «-palabra» excluye); columnas ordenables; clic derecho o arrastrar para organizar.
 - **Bus Monitor**: te escuchas por la salida del dispositivo principal, con el tono del VST, sin el retraso de la grabación.
 - **Compensación de deriva**: las fuentes extra se sincronizan con el reloj principal con remuestreo adaptativo.
 - **Zero Hardcoding**: Detección dinámica de cualquier interfaz (Focusrite, Behringer UMC, MOTU, Audient, Steinberg, Realtek y micrófonos USB).
@@ -45,12 +49,51 @@ Suite de producción audiovisual y streaming nativa para Windows, compatible con
 - **Teléfono**: graba en vertical a resolución completa (el teléfono captura girado).
 - **Webcam**: recorte central 9:16, o «Girar» si la cámara está montada de lado (sin perder resolución). Las tomas llevan «_vertical» en el nombre.
 
+### 📡 Transmisión a Varias Plataformas
+- **YouTube, Twitch, Facebook, Kick, TikTok, Instagram** o cualquier servidor RTMP/RTMPS, a la vez. Se activa como módulo opcional desde la barra lateral.
+- **Una plataforma por recuadro**: cada una se agrega con su símbolo, se enciende y apaga con su propio botón sin cortar a las demás, y al tocarla se actualizan sus accesos (servidor y clave). TikTok e Instagram salen en 9:16 y piden su clave nueva en cada directo.
+- **Un solo codificador por orientación**: la app codifica una vez (GPU si la hay) y un repartidor local ([MediaMTX](https://github.com/bluenviron/mediamtx)) envía la misma señal a cada plataforma; si una falla, se reintenta sola sin afectar a las demás.
+- **Prueba de velocidad**: mide tu subida (12 s) y te dice cuántas plataformas puedes tener al aire en 1080p, 720p o vertical, y elige la calidad de cada salida.
+- **Claves protegidas**: se guardan cifradas con DPAPI de Windows y nunca aparecen en el registro.
+- Imagen de la cámara virtual «UltraCam» y sonido del mezclador, con ajuste de sincronía de audio. Grabar y transmitir a la vez funciona.
+
 ### 🎬 Suite de Post-Grabación Avanzada
+- **Videos más ligeros sin perder calidad**: al guardar, el video se recomprime en HEVC/H.264 con la GPU (NVIDIA NVENC, Intel Quick Sync o AMD AMF) o, si no hay, con el procesador hasta 1080p. Pesa unas 3 veces menos. Si no conviene (4K sin GPU, ya muy comprimido o demasiado lento), se une tal cual como antes. Se puede desactivar en Grabación.
+- **Guardado seguro**: una barra muestra el progreso y bloquea la app mientras se guarda; el resultado se escribe aparte, se comprueba completo (duración, cuadros y pistas de audio) y solo entonces se borran los originales. Si cierras la app a medio guardar, primero pregunta; las tomas sin terminar se recuperan al volver a abrirla.
 - **Multiplexado Instantáneo con FFmpeg (`-c:v copy`)**: Une video intacto con el audio en menos de 2 segundos sin consumir CPU.
 - **Audio Multipista Embebido**: El archivo `.mp4` almacena la Pista 1 (Mezcla Master) y una pista por cada canal del mezclador, con su nombre.
 - **Exportación de Stems WAV**: Tomas individuales sin comprimir a 24-bit / 48kHz en la subcarpeta `stems/`.
 - **DSP y Normalización EBU R128**: la mezcla final a −14 LUFS o con techo de −1 dBFS; las pistas por canal quedan tal cual para editar. Calibrador de sincronización audio/video (+/- ms).
 - **Audio alineado desde el clic**: el audio empieza a grabar al pulsar «Grabar» y al unir se recorta la diferencia exacta con el primer cuadro de la cámara.
+
+---
+
+## 🧩 Arquitectura por módulos
+
+La interfaz y el código están divididos en módulos para poder trabajar en uno sin tocar los demás:
+
+```text
+gui.py                  composición: une el marco y los módulos
+app/                    marco común
+  module.py             contrato de un módulo (panel, avanzado, estado, preparado, ciclo de vida)
+  frame.py · shell.py   barra lateral, panel deslizable, cabecera, cierre seguro
+  settings_panel.py     pestaña «Avanzado» de cada módulo
+  bus.py                eventos entre el marco y los módulos
+modules/
+  cameras/              fuentes de video, ajustes por cámara, iPhone por USB
+  audio/                mezclador (siempre visible), canales, VST3, MIDI
+  recording/            grabación, exportación comprimida y verificada, barra de guardado
+  general/              datos de la app y diagnóstico
+  streaming/            transmisión (opcional): plataformas, cuentas, MediaMTX, prueba de velocidad
+```
+
+Cada módulo tiene su `module.py` (implementa el contrato de `app/module.py`) y su carpeta `ui/`. Los módulos no se importan entre sí (lo comprueba `tests/test_app.py`); se comunican por el marco y el bus. Los opcionales están ocultos hasta que se activan con un botón desde la barra lateral.
+
+---
+
+## 🗒️ Historial de versiones
+
+Qué cambió en cada beta: 📄 **[CHANGELOG.md](CHANGELOG.md)**
 
 ---
 
@@ -64,10 +107,10 @@ Para consultar el análisis técnico detallado de los problemas superados durant
 ## 🚀 Inicio Rápido
 
 1. Descomprime `UltraCamStudio-Portable-<versión>.zip` donde quieras y abre `UltraCamStudio.exe` (o ejecuta `Iniciar_GalaxyCamPro.bat` desde el código). No hay que instalar nada.
-2. Todas las cámaras aparecen juntas en la lista de la izquierda. Al elegir una, la imagen aparece sola.
-3. En el panel derecho: resolución/fps de la cámara y el **Mezclador** (FX, 🎧 monitor, S, M, volumen). «+ Canal» agrega una fuente.
-4. Todo lo demás está en **⚙ Configuración**: General · Video · Audio · Canales y efectos · Grabación · Cámara Virtual · Avanzado.
-5. Pulsa **Grabar** y luego **Detener y guardar**: el MP4 multipista aparece en «Tomas recientes».
+2. La barra lateral tiene un módulo por tarea: **Cámaras**, **Grabación**, **General** y los opcionales que actives (por ahora **Transmisión**). Cada uno abre su panel con «Básico» y «Avanzado». El **Mezclador** de audio está siempre a la derecha.
+3. En **Cámaras** elige una fuente; la imagen aparece sola en el monitor y se abren sus ajustes.
+4. En el mezclador: FX, 🎧 monitor, S, M y volumen por canal. «+ Agregar» crea un canal de entrada o un instrumento VST3.
+5. Pulsa **Grabar** y luego **Terminar**: la barra de guardado muestra el progreso y el MP4 multipista aparece en «Tomas».
 
 ## 📦 Crear la versión portable
 
@@ -82,6 +125,7 @@ Requiere **Build Tools para Visual Studio 2022** con «Desarrollo para el escrit
 
 ```powershell
 py test_engine.py                          # app: motor, interfaz, grabación, avisos
+py -m unittest discover -s tests -t .      # módulos: marco, exportación, transmisión
 py vcam_driver\tests\test_vcam_driver.py   # driver: carteles, modos, 32/64 bits, cambios de fuente
 ```
 

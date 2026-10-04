@@ -12,9 +12,42 @@ import virtualcam
 PREVIEW_HEIGHT = 540
 PREVIEW_MAX_FPS = 30
 
-# El monitor nunca pasa de Full HD (lado largo 1920): es una ayuda visual y ocupa una parte
-# de la pantalla. Una fuente menor no se agranda; una vertical queda en 1080x1920.
-MONITOR_MAX_SIDE = 1920
+def high_speed_sizes(listing: str) -> Dict[str, List[int]]:
+    """Tamaños de «High speed capture» de una cámara en la salida de scrcpy --list-camera-sizes:
+    «- 1920x1080 (fps={120, 240})» → {"1920x1080": [120, 240]}."""
+    out: Dict[str, List[int]] = {}
+    part = listing.split("High speed capture", 1)
+    if len(part) < 2:
+        return out
+    for size, rates in re.findall(r"-\s*(\d+x\d+)\s*\(fps=\{([\d,\s]+)\}\)", part[1]):
+        out[size] = sorted(int(r) for r in re.findall(r"\d+", rates))
+    return out
+
+
+def high_speed_rate(cam: Optional[Dict], size: str, fps: int) -> Optional[int]:
+    """Si la cámara no da `fps` en modo normal pero sí en alta velocidad a ese tamaño, la
+    frecuencia del sensor a pedir (un múltiplo: 120 para 60 fps); el teléfono descarta los
+    cuadros que sobran. Así un Galaxy, que en modo normal se queda en 30, graba a 60.
+    None si no hace falta o no se puede."""
+    if not cam or not fps or not cam.get("fps") or fps in cam["fps"]:
+        return None
+    rates = (cam.get("high_speed") or {}).get(size) or []
+    return next((r for r in sorted(rates) if r % fps == 0), None)
+
+
+def high_speed_sizes_for(cam: Optional[Dict], fps: int) -> List[str]:
+    """Tamaños a los que la cámara llega a `fps` solo con la captura de alta velocidad."""
+    if not cam or not cam.get("fps") or fps in cam["fps"]:
+        return []
+    return [s for s in (cam.get("high_speed") or {}) if high_speed_rate(cam, s, fps)]
+
+
+FULL_HD_SIDE = 1920
+
+# Las fuentes mayores que Full HD se ven en el monitor a 720p como máximo (lado largo 1280):
+# es una ayuda visual que ocupa una parte de la pantalla, y cada cuadro más chico se escala,
+# copia y dibuja antes, que es lo que se nota como retraso. Una fuente menor no se agranda.
+MONITOR_MAX_SIDE = 1280
 MONITOR_SCALE = (f"scale=w='min(iw,{MONITOR_MAX_SIDE})':h='min(ih,{MONITOR_MAX_SIDE})'"
                  ":force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear")
 
@@ -25,18 +58,25 @@ def exceeds_full_hd(size) -> bool:
         w, h = (int(v) for v in str(size).lower().split("x"))
     except ValueError:
         return False
-    return max(w, h) > MONITOR_MAX_SIDE or min(w, h) > 1080
+    return max(w, h) > FULL_HD_SIDE or min(w, h) > 1080
 
 
 # ffplay abre su ventana fuera de la pantalla y la interfaz la incrusta en el monitor. Si la
 # imagen tarda (grabación vertical del teléfono: ~12 s), nunca aparece suelta en el escritorio.
 OFFSCREEN_WINDOW = ["-left", "-32000", "-top", "-32000"]
 
+# Monitor en vivo sin retraso acumulado. Con el reloj del video (lo normal en ffplay) cada
+# cuadro se muestra a su ritmo: si llegan varios juntos tras un tirón (disco, codificador),
+# se quedan en cola y el retraso ya no se recupera. Con reloj externo (tiempo real) los
+# cuadros atrasados se descartan y el monitor vuelve a estar al día. Sin análisis inicial:
+# el encabezado nut ya trae el formato, y los cuadros leídos al analizar eran retraso fijo.
+LIVE_PLAYER_FLAGS = ["-fflags", "nobuffer", "-flags", "low_delay", "-framedrop", "-sync", "ext"]
+
 
 def preview_player_command(ffplay_path: str, window_title: str) -> List[str]:
     """ffplay que muestra en el monitor el video crudo (nut) que le llega por stdin."""
-    return [ffplay_path, "-hide_banner", "-loglevel", "error",
-            "-fflags", "nobuffer", "-flags", "low_delay", "-framedrop",
+    return [ffplay_path, "-hide_banner", "-loglevel", "error"] + LIVE_PLAYER_FLAGS + [
+            "-probesize", "32", "-analyzeduration", "0",
             "-f", "nut", "-i", "pipe:0", "-window_title", window_title] + OFFSCREEN_WINDOW
 
 
@@ -85,7 +125,11 @@ class CommandBuilder:
             cmd.append(f"--capture-orientation={rotation}")
 
         fps = config.get("fps", 30)
-        if fps:
+        high_speed = config.get("high_speed_fps")
+        if fps and high_speed:
+            # Sensor en alta velocidad (p. ej. 120) y el codificador del teléfono deja pasar `fps`
+            cmd += ["--camera-high-speed", f"--camera-fps={high_speed}", f"--max-fps={fps}"]
+        elif fps:
             cmd.append(f"--camera-fps={fps}")
 
         codec = config.get("codec", "h265")
@@ -294,7 +338,7 @@ class CommandBuilder:
             if fps:
                 cmd.extend(["-framerate", str(fps)])
             cmd.extend(["-i", f"video={dev_name}"])
-            cmd.extend(["-fflags", "nobuffer", "-flags", "low_delay", "-framedrop"])
+            cmd.extend(LIVE_PLAYER_FLAGS)
 
             if exceeds_full_hd(size):
                 vf_str = ",".join(([vf_str] if vf_str else []) + [MONITOR_SCALE])

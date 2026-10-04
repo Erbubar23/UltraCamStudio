@@ -26,6 +26,11 @@ Este documento registra de forma exhaustiva los desafíos de ingeniería, incomp
 18. [E18: La cámara virtual aparecía y desaparecía de Windows, y activarla volvía lenta la grabación](#e18-la-cámara-virtual-aparecía-y-desaparecía-de-windows-y-activarla-volvía-lenta-la-grabación)
 19. [E19: La cámara web permanecía encendida tras cerrar la app y bloqueo en cierre (`AppHangB1`)](#e19-la-cámara-web-permanecía-encendida-tras-cerrar-la-app-y-bloqueo-en-cierre-apphangb1)
 20. [E20: Arquitectura Monolítica, Acoplamiento Estricto y Supresión Silenciosa de Excepciones (`bare except`)](#e20-arquitectura-monolítica-acoplamiento-estricto-y-supresión-silenciosa-de-excepciones-bare-except)
+21. [E21: Plugins VST3 en carpeta (bundle) no cargaban: «unsupported plugin format»](#e21-plugins-vst3-en-carpeta-bundle-no-cargaban-unsupported-plugin-format)
+22. [E22: El teléfono no pasaba de 30 fps](#e22-el-teléfono-no-pasaba-de-30-fps)
+23. [E23: NVENC fallaba al comprimir con el FFmpeg de desarrollo](#e23-nvenc-fallaba-al-comprimir-con-el-ffmpeg-de-desarrollo)
+24. [E24: El monitor de video tapaba los paneles de la interfaz](#e24-el-monitor-de-video-tapaba-los-paneles-de-la-interfaz)
+25. [E25: Apagar una plataforma no cortaba su envío](#e25-apagar-una-plataforma-no-cortaba-su-envío)
 
 ---
 
@@ -430,6 +435,68 @@ Misma prueba, 6 segundos de 1920x1080@60 con grabación, monitor y cámara virtu
    - **Fachada Limpia (`engine.py`)**: `CameraEngine` actúa como orquestador limpio y fachada manteniendo 100% de retrocompatibilidad con la suite de pruebas `test_engine.py`.
 2. **Depuración de Excepciones**:
    - Todos los bloques `except: pass` fueron reemplazados por excepciones específicas (`OSError`, `ctk.CTkError`, etc.) o enrutados a `GLOBAL_LOGGER` con niveles adecuados (`DEBUG`, `WARN`, `ERROR`).
+
+## E21: Plugins VST3 en carpeta (bundle) no cargaban: «unsupported plugin format»
+
+### Síntoma
+Plugins instalados como carpeta `.vst3` (Amp Locker, Decent Sampler, KV-Element, Mobius) aparecían en la lista pero al agregarlos quedaban «no se pudo cargar»:
+```text
+VST3Plugin: Unable to scan plugin C:\Program Files\Common Files\VST3\DecentSampler.vst3: unsupported plugin format or scan failure.
+```
+
+### Causa Raíz
+En Windows un VST3 puede ser un archivo o una carpeta (bundle) con el binario en `Contents\x86_64-win\<nombre>.vst3`. `scan_vst3` devuelve la carpeta (para no listar el plugin dos veces) y pedalboard/JUCE en Windows no la acepta: necesita el binario de adentro.
+
+### Solución Implementada
+`vst_probe.plugin_binary()` convierte la carpeta en la ruta del binario justo antes de cargar (en el servidor de audio y en la clasificación de plugins). La configuración guardada sigue usando la ruta de la carpeta, así que los canales existentes empiezan a cargar sin tocar nada.
+
+## E22: El teléfono no pasaba de 30 fps
+
+### Síntoma
+Con un Samsung Galaxy S23 Ultra (SM-S918B), en el selector de formato solo aparecían modos a 30 fps aunque la cámara del teléfono graba a 60.
+
+### Causa Raíz
+Android solo ofrece más de 30 fps a través de las **sesiones de alta velocidad** de Camera2. La lista normal de `scrcpy --list-camera-sizes` (la que usaba la app) incluye únicamente los tamaños de la sesión normal, limitados a 30 fps. Los tamaños de alta velocidad salen en una lista aparte y solo funcionan con `--camera-high-speed`, a 120 fps de captura en la mayoría de los equipos.
+
+### Solución Implementada
+`get_device_cameras` lee también los tamaños de alta velocidad (`high_speed_sizes`). Para 60 fps la app lanza `--camera-high-speed --camera-fps=120 --max-fps=60`: el sensor captura a 120 y scrcpy entrega 60 cuadros parejos. Esto solo existe hasta 1080p, así que 4K queda a 30 fps. Verificado con el teléfono del usuario midiendo los cuadros grabados.
+
+## E23: NVENC fallaba al comprimir con el FFmpeg de desarrollo
+
+### Síntoma
+Al probar la exportación comprimida desde el código (sin empaquetar), el codificador de NVIDIA no arrancaba:
+```text
+Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0
+The minimum required Nvidia driver for nvenc is 610.00 or newer
+```
+
+### Causa Raíz
+El FFmpeg instalado con WinGet está compilado contra la API NVENC 13.1, que necesita el driver de NVIDIA 610 o superior. La PC de pruebas tenía el 591.86. El FFmpeg que se incluye en la versión portable usa una API anterior y funciona con ese driver.
+
+### Solución Implementada
+La exportación no depende de un codificador: prueba en orden NVENC → Quick Sync → AMF → procesador (libx265/libx264, solo hasta 1080p) y, si ninguno sirve, une el video tal cual (`-c:v copy`) como antes. También vuelve a copiar si la compresión va a menos de 0.8× tiempo real tras 12 s o si el resultado no pesa menos. El mismo orden se usa para el codificador de la transmisión.
+
+## E24: El monitor de video tapaba los paneles de la interfaz
+
+### Síntoma
+Al abrir un panel lateral (Cámaras, Grabación, Transmisión) sobre la imagen, el video seguía dibujándose encima y el panel quedaba oculto o cortado.
+
+### Causa Raíz
+El monitor es una ventana nativa de ffplay/scrcpy incrustada con `SetParent` (E7). Windows siempre dibuja una ventana hija nativa por encima de los widgets de Tk, que se pintan en la ventana padre; no hay orden de capas que lo evite.
+
+### Solución Implementada
+El panel lateral no se superpone: **empuja** la zona central, y el monitor se redimensiona al espacio que queda (`RedrawWindow` tras cada cambio para que no queden restos). Por debajo de 820 px de ancho la zona central se reorganiza para seguir cabiendo.
+
+## E25: Apagar una plataforma no cortaba su envío
+
+### Síntoma
+En el prototipo de la transmisión, al dar de baja un destino, el servidor RTMP de prueba que hacía de plataforma seguía recibiendo datos.
+
+### Causa Raíz
+Cada plataforma es una ruta propia de MediaMTX (`d_<id>`) que reenvía la señal local. Para quitar una ruta, la API v3 de MediaMTX exige el método **DELETE** en `/v3/config/paths/delete/<ruta>`; la petición enviada con otro método no se aplicaba y la ruta seguía viva.
+
+### Solución Implementada
+`MediaMtx.remove_relay()` usa `DELETE`. Se verificó con tres servidores RTMP locales: al apagar uno, ese deja de recibir y los otros dos y el codificador siguen sin cortes. Las claves nunca se escriben en la configuración ni en el registro: la URL viaja como `servidor#clave` y el registro la muestra como `servidor#•••`.
 
 ---
 *Documento actualizado y verificado para la versión UltraCam Studio Pro.*

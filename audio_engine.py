@@ -1,8 +1,8 @@
 """
 UltraCam Studio - Cliente del motor de audio
 
-La interfaz usa esta clase; el trabajo de audio real (dispositivos, VST3, mezcla,
-monitor y grabación) ocurre en el proceso de audio_server. Aquí solo se envían
+La interfaz usa esta clase; el trabajo de audio real (dispositivos, VST3, instrumentos,
+MIDI, mezcla, monitor y grabación) ocurre en el proceso de audio_server. Aquí solo se envían
 comandos y se reciben eventos (vúmetros, estadísticas, estado de los plugins).
 """
 
@@ -46,8 +46,29 @@ def new_channel(name: str, source: Dict, mode: str = "mono", monitor: bool = Fal
             "solo": False, "monitor": monitor, "fx": [], "color": color}
 
 
+def new_instrument_source(path: str) -> Dict:
+    """Fuente de un canal de instrumento: el VST3, su preset y de dónde recibe MIDI
+    (midi_in: "*" = todas las entradas, None = ninguna; midi_ch: 0 = Omni, 1–16)."""
+    return {"kind": "instrument", "id": new_id("inst"), "path": path, "midi_in": "*", "midi_ch": 0}
+
+
+def plugin_name(path: str) -> str:
+    return os.path.splitext(os.path.basename(path or ""))[0]
+
+
+def midi_label(src: Dict) -> str:
+    dev = src.get("midi_in", "*")
+    if not dev:
+        return "sin MIDI"
+    who = "todo MIDI" if dev == "*" else dev
+    mch = int(src.get("midi_ch", 0) or 0)
+    return who + (f" · canal {mch}" if mch else "")
+
+
 def source_label(src: Dict, cfg: Dict) -> str:
     kind = src.get("kind")
+    if kind == "instrument":
+        return f"🎹 {plugin_name(src.get('path'))} · {midi_label(src)}"
     if kind == "main":
         cols = src.get("ch", [0])
         dev = cfg.get("asio_device") if cfg.get("driver") == "asio" else cfg.get("input_device")
@@ -56,6 +77,39 @@ def source_label(src: Dict, cfg: Dict) -> str:
     if kind == "device":
         return f"{src.get('device')}" + (" · Lo que suena" if src.get("loopback") else "")
     return "Sin fuente"
+
+
+def short_device(name: str) -> str:
+    """«Micrófono (Realtek(R) Audio)» → «Micrófono»; lo que no tiene paréntesis queda igual."""
+    base = (name or "").split(" (")[0].strip() or (name or "").strip()
+    return base if len(base) <= 22 else base[:21] + "…"
+
+
+def default_channel_name(src: Dict, channels: List[Dict], default_out: Optional[str] = None,
+                         label: Optional[str] = None) -> str:
+    """Nombre útil para un canal nuevo según su fuente (en vez de «Canal 3»), sin repetir
+    uno que ya exista: «Entrada 1», «Entradas 1-2», «Sonido del PC», el nombre del instrumento…
+    `label` (lo que mostraba quien lo eligió, p. ej. el nombre del plugin) manda sobre todo eso."""
+    kind = src.get("kind")
+    if label:
+        base = label
+    elif kind == "main":
+        cols = [c + 1 for c in src.get("ch", [0])]
+        base = f"Entrada {cols[0]}" if len(cols) == 1 else f"Entradas {cols[0]}-{cols[-1]}"
+    elif kind == "instrument":
+        base = plugin_name(src.get("path")) or "Instrumento"
+    elif kind == "device" and src.get("loopback"):
+        dev = src.get("device") or ""
+        base = "Sonido del PC" if not dev or dev == default_out else f"Sonido · {short_device(dev)}"
+    elif kind == "device":
+        base = short_device(src.get("device") or "") or "Micrófono"
+    else:
+        base = f"Canal {len(channels) + 1}"
+    taken = {c.get("name") for c in channels}
+    name, n = base, 2
+    while name in taken:
+        name, n = f"{base} {n}", n + 1
+    return name
 
 
 def scan_vst3(extra_dirs: Optional[List[str]] = None) -> List[Dict]:
@@ -90,6 +144,7 @@ class AudioEngine(IAudioEngine):
         self.stats: Dict = {}
         self.devices: Dict = {}
         self.fx_status: Dict[str, List[Dict]] = {}
+        self.inst_status: Dict[str, Dict] = {}          # {canal: {"name", "error"}}
         self.editor_open: Optional[str] = None
         self.is_recording = False
         # Callbacks de la interfaz (se llaman desde un hilo de fondo)
@@ -99,6 +154,10 @@ class AudioEngine(IAudioEngine):
         self.on_fx: Optional[Callable[[str], None]] = None
         self.on_fx_state: Optional[Callable[[str, str, str], None]] = None
         self.on_editor: Optional[Callable[[str, str, bool], None]] = None
+        self.on_midi: Optional[Callable[[List[str]], None]] = None   # canales que recibieron MIDI
+        # Con meter_inputs: dB de cada entrada del dispositivo principal y {otro micrófono: dB}
+        self.on_inputs: Optional[Callable[[List[float], Dict[str, float]], None]] = None
+        self.on_midi_learned: Optional[Callable[[str, int], None]] = None   # (entrada MIDI, canal 1–16)
 
     # ---------------------------------------------------------------- Proceso
     def start(self):
@@ -176,6 +235,13 @@ class AudioEngine(IAudioEngine):
         elif kind == "levels":
             if self.on_levels:
                 self.on_levels(data["ch"], data["master"], data["monitor"])
+            if data.get("midi") and self.on_midi:
+                self.on_midi(data["midi"])
+            if ("inputs" in data or "devices" in data) and self.on_inputs:
+                self.on_inputs(data.get("inputs") or [], data.get("devices") or {})
+        elif kind == "midi_learned":
+            if self.on_midi_learned:
+                self.on_midi_learned(data["dev"], data["ch"])
         elif kind == "stats":
             self.stats = data
             if self.on_stats:
@@ -184,6 +250,10 @@ class AudioEngine(IAudioEngine):
             self._log(data["msg"], data.get("cat", "AUDIO"))
         elif kind == "fx_loaded":
             self.fx_status[data["ch"]] = data["fx"]
+            if self.on_fx:
+                self.on_fx(data["ch"])
+        elif kind == "inst_loaded":
+            self.inst_status[data["ch"]] = {"name": data["name"], "error": data["error"]}
             if self.on_fx:
                 self.on_fx(data["ch"])
         elif kind == "fx_state":
@@ -246,6 +316,24 @@ class AudioEngine(IAudioEngine):
     def open_editor(self, cid: str, fx_id: str):
         self._send("open_editor", {"ch": cid, "fx": fx_id})
 
+    def test_note(self, cid: str, note: int = 60):
+        """Toca una nota corta en un canal de instrumento (para probar sin teclado)."""
+        self._send("test_note", {"ch": cid, "note": note})
+
+    def test_chord(self, cid: str, root: int = 60):
+        """Acorde mayor corto: confirma al crear un instrumento que ya suena."""
+        for note in (root, root + 4, root + 7):
+            self.test_note(cid, note)
+
+    def meter_inputs(self, on: bool):
+        """Mide todas las entradas del dispositivo principal (llegan por on_inputs), para
+        elegir la de un canal nuevo viendo cuál se mueve."""
+        self._send("meter_inputs", {"on": bool(on), "config": self.config})
+
+    def midi_learn(self, on: bool):
+        """Escucha todas las entradas MIDI: la primera nota llega por on_midi_learned."""
+        self._send("midi_learn", {"on": bool(on)})
+
     def close_editor(self):
         self._send("close_editor", {})
 
@@ -255,6 +343,10 @@ class AudioEngine(IAudioEngine):
     def _store_fx_state(self, cid: str, fx_id: str, state: str):
         ch = self.channel(cid)
         if ch:
+            src = ch.get("source", {})
+            if src.get("kind") == "instrument" and src.get("id") == fx_id:
+                src["state"] = state
+                return
             for f in ch["fx"]:
                 if f["id"] == fx_id:
                     f["state"] = state

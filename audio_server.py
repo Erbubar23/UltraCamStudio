@@ -8,6 +8,9 @@ Arquitectura (como JUCE / Ableton / Reaper):
   - FUENTES EXTRA (otros dispositivos, loopback "lo que suena") se capturan por WASAPI
     con PyAudioWPatch y se sincronizan al reloj principal con remuestreo adaptativo
     (compensación de deriva), igual que hacen OBS y los DAW al mezclar interfaces.
+  - CANALES DE INSTRUMENTO: un VST3 instrumento (sintetizador, sampler) que se toca con
+    un teclado MIDI. La entrada MIDI (winmm) encola los mensajes y el callback se los
+    entrega al instrumento al inicio de cada bloque.
   - Dos buses: MASTER (grabación y OBS) y MONITOR (audífonos, sin retraso extra).
   - Fuera del callback: escritura de WAV, vúmetros y envío a OBS, en otro hilo.
 
@@ -34,8 +37,11 @@ os.environ.setdefault("SD_ENABLE_ASIO", "1")
 
 import numpy as np
 
+from midi_input import MidiRouter, list_inputs
+
 SAMPLE_RATES = (44100, 48000, 88200, 96000)
 BUFFER_SIZES = (64, 128, 256, 512, 1024)
+METER_MAX_INPUTS = 16        # entradas que se miden al elegir la de un canal nuevo
 
 
 def _dbfs(peak: float) -> float:
@@ -160,7 +166,32 @@ class Channel:
         self.active_fx: tuple = ()          # plugins listos, en orden (lo que usa el callback)
         self.cols: Optional[List[int]] = None   # columnas del dispositivo principal
         self.buf: Optional[DriftBuffer] = None  # fuente extra
+        self.inst: Optional[FxSlot] = None      # instrumento VST3 (fuente "instrument")
+        self.inst_plugin = None                 # lo que usa el callback (None si no cargó)
+        self.midi_q: collections.deque = collections.deque(maxlen=512)
+        self.midi_hits = 0                      # mensajes recibidos (para el indicador de actividad)
         self.error: Optional[str] = None
+
+    def midi_push(self, data: bytes):
+        """Llamado desde el hilo de winmm (o de un comando): el callback lo toma en el próximo bloque."""
+        self.midi_q.append(data)
+        self.midi_hits += 1
+
+    def drain_midi(self) -> list:
+        msgs = []
+        q = self.midi_q
+        while q:
+            try:
+                msgs.append((q.popleft(), 0.0))
+            except IndexError:
+                break
+        return msgs
+
+    def panic(self):
+        """Suelta todas las notas y el pedal en los 16 canales MIDI (tras recargar la configuración)."""
+        for c in range(16):
+            self.midi_q.append(bytes((0xB0 | c, 64, 0)))
+            self.midi_q.append(bytes((0xB0 | c, 123, 0)))
 
 
 # =============================================================================
@@ -199,7 +230,15 @@ class AudioServer:
         self.feed = None
         # Editor abierto
         self.editor_close: Optional[threading.Event] = None
-        self.plugin_cache: Dict[str, object] = {}
+        # Teclados y controladores MIDI
+        self.midi = MidiRouter(self.log)
+        self.midi.on_learn = lambda dev, mch: self.send("midi_learned", dev=dev, ch=mch)
+        # Medir todas las entradas del dispositivo principal (al agregar un canal: se ve
+        # cuál se mueve al hablar o tocar), aunque ningún canal las use todavía. Los otros
+        # micrófonos de Windows se miden con flujos propios: {nombre: pico desde el último envío}.
+        self.meter_inputs = False
+        self.meter_streams = []
+        self.dev_peaks: Dict[str, float] = {}
 
     # ------------------------------------------------------------------ IPC
     def send(self, kind: str, **data):
@@ -266,6 +305,7 @@ class AudioServer:
                                      "in": int(d["maxInputChannels"]), "sr": int(d["defaultSampleRate"])})
         except Exception as e:
             self.log(f"No se pudieron listar fuentes extra: {e}", "WARN")
+        out["midi_in"] = list_inputs()
         return out
 
     def _find_sd_device(self, name: Optional[str], api_name: str, need_in: bool, need_out: bool) -> Optional[int]:
@@ -298,7 +338,8 @@ class AudioServer:
     # --------------------------------------------------------------- Plugins
     def _load_plugin(self, path: str):
         import pedalboard
-        return pedalboard.load_plugin(path)
+        from vst_probe import plugin_binary
+        return pedalboard.load_plugin(plugin_binary(path))
 
     def _prepare_fx(self, ch: Channel, fx_cfg: List[Dict]):
         """Carga los plugins de un canal (en el hilo principal, como pide JUCE)."""
@@ -325,9 +366,48 @@ class AudioServer:
         ch.active_fx = tuple(s.plugin for s in slots if s.enabled and s.plugin is not None)
         self.send("fx_loaded", ch=ch.id, fx=[{"id": s.id, "name": s.name, "error": s.error} for s in slots])
 
-    def _fx_state(self, ch_id: str, fx_id: str) -> Optional[str]:
+    def _prepare_instrument(self, ch: Channel, prev: Optional[Channel]):
+        """Carga (o reutiliza) el instrumento VST3 de un canal con fuente "instrument"."""
+        src = ch.source
+        path = src.get("path") or ""
+        if not path:
+            ch.error = "Elige un instrumento"
+            return
+        slot = prev.inst if prev is not None else None
+        if slot is None or slot.path != path or slot.id != src.get("id"):
+            slot = FxSlot(src.get("id") or "inst", path)
+            try:
+                slot.plugin = self._load_plugin(path)
+                slot.name = getattr(slot.plugin, "name", slot.name) or slot.name
+                if not getattr(slot.plugin, "is_instrument", False):
+                    slot.error = "Este plugin es un efecto, no un instrumento"
+                    slot.plugin = None
+                elif src.get("state"):
+                    try:
+                        slot.plugin.raw_state = base64.b64decode(src["state"])
+                    except Exception as e:
+                        self.log(f"{slot.name}: no se pudo restaurar su preset ({e})", "WARN")
+            except Exception as e:
+                slot.error = str(e)
+                self.log(f"No se pudo cargar el instrumento {os.path.basename(path)}: {e}", "ERROR")
+        ch.inst = slot
+        ch.inst_plugin = slot.plugin
+        if slot.error:
+            ch.error = slot.error
+        ch.panic()
+        self.send("inst_loaded", ch=ch.id, name=slot.name, error=slot.error)
+
+    def _slot(self, ch_id: str, fx_id: str) -> Optional[FxSlot]:
+        """Efecto o instrumento de un canal, por su id."""
         ch = self._channel(ch_id)
-        slot = next((s for s in ch.fx if s.id == fx_id), None) if ch else None
+        if ch is None:
+            return None
+        if ch.inst is not None and ch.inst.id == fx_id:
+            return ch.inst
+        return next((s for s in ch.fx if s.id == fx_id), None)
+
+    def _fx_state(self, ch_id: str, fx_id: str) -> Optional[str]:
+        slot = self._slot(ch_id, fx_id)
         if slot and slot.plugin is not None:
             try:
                 return base64.b64encode(bytes(slot.plugin.raw_state)).decode("ascii")
@@ -338,7 +418,7 @@ class AudioServer:
 
     def _open_editor(self, ch_id: str, fx_id: str):
         ch = self._channel(ch_id)
-        slot = next((s for s in ch.fx if s.id == fx_id), None) if ch else None
+        slot = self._slot(ch_id, fx_id)
         if not slot or slot.plugin is None:
             self.log("El plugin no está cargado.", "WARN")
             return
@@ -379,6 +459,8 @@ class AudioServer:
             prev = old.get(ch.id)
             if prev:
                 ch.fx = prev.fx                 # reutiliza plugins ya cargados
+            if ch.source.get("kind") == "instrument":
+                self._prepare_instrument(ch, prev)
             self._prepare_fx(ch, cc.get("fx", []))
             chans.append(ch)
         self.channels = chans
@@ -386,6 +468,7 @@ class AudioServer:
         self.last_error = None
         self._open_main()
         self._open_extras()
+        self._open_midi()
         self.rt_channels = tuple(self.channels)
         self._send_stats()
 
@@ -402,7 +485,7 @@ class AudioServer:
         if in_name and i_in is None and out_name and i_out is None:
             self.last_error = f"No se encontró «{in_name}»."
         # Columnas de entrada que usan los canales del dispositivo principal
-        n_in = 0
+        n_in = max_in = 0
         if i_in is not None:
             max_in = sd.query_devices(i_in)["max_input_channels"]
             for ch in self.channels:
@@ -413,6 +496,8 @@ class AudioServer:
                         n_in = max(n_in, max(cols) + 1)
                     else:
                         ch.error = "Entrada no disponible en este dispositivo"
+            if self.meter_inputs:
+                n_in = max(n_in, min(max_in, METER_MAX_INPUTS))
         out_pair = self.cfg.get("monitor_out", [0, 1])
         n_out = 0
         if i_out is not None:
@@ -425,7 +510,7 @@ class AudioServer:
         if n_out == 0:
             i_out = None
         self.device_info = {"driver": driver, "input": in_name if i_in is not None else None,
-                            "output": out_name if i_out is not None else None}
+                            "output": out_name if i_out is not None else None, "max_in": max_in}
         if i_in is None and i_out is None:
             self._start_clock()                  # sin dispositivo principal: reloj por software
             return
@@ -487,6 +572,21 @@ class AudioServer:
             except Exception as e:
                 ch.error = str(e)
                 self.log(f"{ch.name}: no se pudo abrir «{src.get('device')}»: {e}", "ERROR")
+
+    def _open_midi(self):
+        """Conecta cada canal de instrumento a su entrada MIDI (o a todas) y a su canal MIDI."""
+        routes = []
+        for ch in self.channels:
+            src = ch.source
+            if src.get("kind") != "instrument" or ch.inst_plugin is None:
+                continue
+            dev = src.get("midi_in", MidiRouter.ALL)
+            if dev:
+                routes.append((dev, int(src.get("midi_ch", 0) or 0), ch))
+        self.midi.set_routes(routes)
+        for dev, _mch, ch in routes:
+            if self.midi.failed(dev):
+                ch.error = f"Entrada MIDI «{dev}» no disponible"
 
     def _stop_streams(self):
         self.clock_stop.set()
@@ -558,6 +658,18 @@ class AudioServer:
                     sig = indata[:, ch.cols[:2]].copy()
             elif ch.buf is not None:
                 sig = ch.buf.pull(n)
+            elif ch.inst_plugin is not None:
+                try:
+                    y = ch.inst_plugin.process(ch.drain_midi(), n / float(self.sr), self.sr, 2, n, False)
+                    sig = np.zeros((n, 2), dtype=np.float32)
+                    m = min(n, y.shape[1])
+                    sig[:m, 0] = y[0, :m]
+                    sig[:m, 1] = y[1 if y.shape[0] > 1 else 0, :m]
+                except Exception as e:
+                    ch.error = f"Error del instrumento: {e}"
+                    posts.append(None)
+                    peaks.append(0.0)
+                    continue
             else:
                 posts.append(None)
                 peaks.append(0.0)
@@ -586,8 +698,9 @@ class AudioServer:
             outdata[:, pair[0]] = out[:, 0]
             if len(pair) > 1:
                 outdata[:, pair[1]] = out[:, 1]
+        in_peaks = np.abs(indata).max(axis=0) if self.meter_inputs and indata is not None and n else None
         try:
-            self.out_q.put_nowait((master, posts, peaks, float(np.abs(mon).max()) * self.monitor_volume))
+            self.out_q.put_nowait((master, posts, peaks, float(np.abs(mon).max()) * self.monitor_volume, in_peaks))
         except queue.Full:
             self.dropped += 1
 
@@ -598,9 +711,11 @@ class AudioServer:
         acc_peaks: Dict[str, float] = {}
         acc_master = 0.0
         acc_mon = 0.0
+        acc_inputs = None
+        midi_seen: Dict[str, int] = {}
         while self.running:
             try:
-                master, posts, peaks, mon_peak = self.out_q.get(timeout=0.25)
+                master, posts, peaks, mon_peak, in_peaks = self.out_q.get(timeout=0.25)
             except queue.Empty:
                 master = None
             now = time.perf_counter()
@@ -611,6 +726,9 @@ class AudioServer:
                     self.clipping = True
                 acc_master = max(acc_master, mpk)
                 acc_mon = max(acc_mon, mon_peak)
+                if in_peaks is not None:
+                    acc_inputs = in_peaks if acc_inputs is None or len(acc_inputs) != len(in_peaks) \
+                        else np.maximum(acc_inputs, in_peaks)
                 for ch, pk in zip(chans, peaks):
                     acc_peaks[ch.id] = max(acc_peaks.get(ch.id, 0.0), pk)
                 pcm_master = (np.clip(master, -1.0, 1.0) * 32767.0).astype(np.int16)
@@ -633,9 +751,21 @@ class AudioServer:
                     feed.push(pcm_master.tobytes())
             if now - last_meter >= 0.05:
                 last_meter = now
+                midi = []
+                for ch in self.rt_channels:
+                    if ch.midi_hits != midi_seen.get(ch.id, 0):
+                        midi_seen[ch.id] = ch.midi_hits
+                        midi.append(ch.id)
+                extra = {}
+                if self.meter_inputs and acc_inputs is not None:
+                    extra["inputs"] = [_dbfs(float(v)) for v in acc_inputs]
+                if self.meter_streams:
+                    peaks, self.dev_peaks = self.dev_peaks, {}
+                    extra["devices"] = {k: _dbfs(v) for k, v in peaks.items()}
                 self.send("levels", ch={k: _dbfs(v) for k, v in acc_peaks.items()},
-                          master=_dbfs(acc_master), monitor=_dbfs(acc_mon))
+                          master=_dbfs(acc_master), monitor=_dbfs(acc_mon), midi=midi, **extra)
                 acc_peaks = {}
+                acc_inputs = None
                 acc_master = acc_mon = 0.0
             if now - last_stats >= 1.0:
                 last_stats = now
@@ -702,7 +832,7 @@ class AudioServer:
     def handle(self, cmd: str, args: Dict, rid):
         """Se ejecuta en el hilo de comandos. Lo que toca plugins o dispositivos va al hilo principal."""
         # Todo lo que toca PortAudio/WASAPI (COM) o plugins corre en el hilo principal
-        if cmd in ("config", "open_editor", "asio_panel", "fx", "devices"):
+        if cmd in ("config", "open_editor", "asio_panel", "fx", "devices", "meter_inputs", "midi_learn"):
             self.main_jobs.put((cmd, args, rid))
             if cmd == "open_editor" and self.editor_close is not None:
                 self.editor_close.set()          # cierra la ventana anterior para abrir la nueva
@@ -726,7 +856,7 @@ class AudioServer:
         elif cmd == "fx_states":
             states = {}
             for ch in self.channels:
-                for s in ch.fx:
+                for s in ([ch.inst] if ch.inst is not None else []) + ch.fx:
                     st = self._fx_state(ch.id, s.id)
                     if st:
                         states.setdefault(ch.id, {})[s.id] = st
@@ -737,6 +867,13 @@ class AudioServer:
         elif cmd == "feed_stop":
             self._stop_feed()
             self.reply(rid)
+        elif cmd == "test_note":
+            ch = self._channel(args["ch"])
+            if ch is not None and ch.inst_plugin is not None:
+                note = int(args.get("note", 60))
+                mc = max(0, int(ch.source.get("midi_ch", 0) or 1) - 1)
+                ch.midi_push(bytes((0x90 | mc, note, 100)))
+                threading.Timer(0.6, ch.midi_push, args=(bytes((0x80 | mc, note, 0)),)).start()
         elif cmd == "close_editor":
             if self.editor_close is not None:
                 self.editor_close.set()
@@ -762,10 +899,78 @@ class AudioServer:
                 self._open_editor(args["ch"], args["fx"])
             elif cmd == "asio_panel":
                 self._asio_panel()
+            elif cmd == "meter_inputs":
+                self._set_meter_inputs(bool(args.get("on")), args.get("config"))
+            elif cmd == "midi_learn":
+                self.midi.set_learning(bool(args.get("on")))
         except Exception as e:
             self.log(f"Error de audio: {e}", "ERROR")
             self.send("log", msg=traceback.format_exc()[-600:], cat="DEBUG")
             self.reply(rid, ok=False, error=str(e))
+
+    def _set_meter_inputs(self, on: bool, cfg: Optional[Dict]):
+        """Mide (o deja de medir) todas las entradas del dispositivo principal. Si para eso hay
+        que abrir más entradas de las que usan los canales, se reabre el dispositivo con `cfg`
+        (la configuración actual de la interfaz: volúmenes y efectos al día). Nunca mientras se
+        graba (sería un corte en la toma): entonces se miden las entradas que ya están abiertas."""
+        if on == self.meter_inputs:
+            return
+        self.meter_inputs = on
+        if not on:
+            self._close_meter_streams()
+        if self.rec_files is not None or not (cfg or self.cfg):
+            return
+        if on:
+            self._open_meter_streams()
+        n_in = self.device_info.get("n_in") or 0
+        in_use = any(ch.cols for ch in self.channels)
+        # Al dejar de medir, las entradas de más quedan abiertas hasta la próxima configuración
+        # (agregar el canal ya reabre); solo se cierra si ningún canal usa el dispositivo,
+        # para no dejar el micrófono abierto sin motivo.
+        if (on and n_in < min(self.device_info.get("max_in") or 0, METER_MAX_INPUTS)) or \
+                (not on and n_in and not in_use):
+            self.apply_config(cfg or self.cfg)
+
+    def _open_meter_streams(self):
+        """Abre cada micrófono de Windows (WASAPI compartido, sin loopbacks) solo para medirlo:
+        en interfaces que Windows parte en «IN 1», «IN 2», «IN 1-2» se ve cuál es cuál."""
+        self._close_meter_streams()
+        try:
+            pa = self._import_pa()
+            wasapi = pa.get_host_api_info_by_type(self.pa_mod.paWASAPI)["index"]
+            devices = [pa.get_device_info_by_index(i) for i in range(pa.get_device_count())]
+        except Exception as e:
+            self.log(f"No se pudieron medir los micrófonos de Windows: {e}", "DEBUG")
+            return
+        for d in devices:
+            if d["hostApi"] != wasapi or d.get("maxInputChannels", 0) <= 0 or d.get("isLoopbackDevice"):
+                continue
+
+            def _cb(in_data, frame_count, time_info, status, name=d["name"]):
+                a = np.frombuffer(in_data, dtype=np.int16)
+                if a.size:
+                    pk = max(int(a.max()), -int(a.min())) / 32768.0
+                    if pk > self.dev_peaks.get(name, 0.0):
+                        self.dev_peaks[name] = pk
+                return (None, self.pa_mod.paContinue)
+            try:
+                st = pa.open(format=self.pa_mod.paInt16, channels=max(1, int(d["maxInputChannels"])),
+                             rate=int(d["defaultSampleRate"]), input=True, input_device_index=d["index"],
+                             frames_per_buffer=1024, stream_callback=_cb)
+                st.start_stream()
+                self.meter_streams.append(st)
+            except Exception as e:
+                self.log(f"No se pudo medir «{d['name']}»: {e}", "DEBUG")
+
+    def _close_meter_streams(self):
+        for st in self.meter_streams:
+            try:
+                st.stop_stream()
+                st.close()
+            except Exception as e:
+                self.log(f"Aviso al cerrar la medición de un micrófono: {e}", "DEBUG")
+        self.meter_streams = []
+        self.dev_peaks = {}
 
     def _asio_panel(self):
         """Abre el panel del driver ASIO (donde muchas interfaces fijan el tamaño del búfer)."""
@@ -813,6 +1018,8 @@ class AudioServer:
                 break
             self.run_main_job(cmd, args, rid)
         self._stop_feed()
+        self.midi.close()
+        self._close_meter_streams()
         self._stop_streams()
         try:
             if self.pa is not None:

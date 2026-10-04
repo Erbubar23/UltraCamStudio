@@ -59,7 +59,7 @@ function Get-Vendor($name, $repo, $pattern) {
     return @{ Dir = $dir; Tmp = $tmp; Zip = $zip }
 }
 
-Write-Host "[3/5] Obteniendo scrcpy y FFmpeg..."
+Write-Host "[3/5] Obteniendo scrcpy, FFmpeg y MediaMTX..."
 $sc = Get-Vendor "scrcpy" "Genymobile/scrcpy" '^scrcpy-win64-v[\d.]+\.zip$'
 if ($sc -is [hashtable]) {
     $src = Get-ChildItem $sc.Tmp -Directory | Select-Object -First 1
@@ -79,6 +79,13 @@ if ($ff -is [hashtable]) {
     Remove-Item -Recurse -Force $ff.Tmp; Remove-Item -Force $ff.Zip
     New-Item -ItemType File (Join-Path $ff.Dir ".ok") | Out-Null
 }
+# MediaMTX (MIT): reparte la transmisión a cada plataforma con un solo codificador
+$mx = Get-Vendor "mediamtx" "bluenviron/mediamtx" '^mediamtx_v[\d.]+_windows_amd64\.zip$'
+if ($mx -is [hashtable]) {
+    Get-ChildItem $mx.Tmp -File | Where-Object { $_.Name -in "mediamtx.exe", "LICENSE" } | Copy-Item -Destination $mx.Dir
+    Remove-Item -Recurse -Force $mx.Tmp; Remove-Item -Force $mx.Zip
+    New-Item -ItemType File (Join-Path $mx.Dir ".ok") | Out-Null
+}
 
 # Driver de la cámara virtual «UltraCam» (C++): requiere Build Tools 2022 con C++
 Write-Host "      Compilando el driver de la cámara virtual..."
@@ -97,7 +104,7 @@ if (Test-Path $AppDir) { Remove-Item -Recurse -Force $AppDir }
     --collect-all _sounddevice_data `
     --collect-all pedalboard `
     --collect-all obsws_python `
-    --hidden-import settings_window --hidden-import audio_server `
+    --hidden-import audio_server `
     --distpath $Dist --workpath (Join-Path $Build "pyi") --specpath $Build `
     (Join-Path $Root "main.py")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló" }
@@ -106,6 +113,7 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller falló" }
 New-Item -ItemType Directory -Force (Join-Path $AppDir "bin") | Out-Null
 Copy-Item -Recurse (Join-Path $Vendor "scrcpy") (Join-Path $AppDir "bin\scrcpy")
 Copy-Item -Recurse (Join-Path $Vendor "ffmpeg") (Join-Path $AppDir "bin\ffmpeg")
+Copy-Item -Recurse (Join-Path $Vendor "mediamtx") (Join-Path $AppDir "bin\mediamtx")
 Get-ChildItem (Join-Path $AppDir "bin") -Recurse -Filter ".ok" | Remove-Item -Force
 # La app registra la cámara al abrirse con la ruta de estas DLL (por usuario, sin administrador)
 $VcamDir = Join-Path $AppDir "vcam_driver"
