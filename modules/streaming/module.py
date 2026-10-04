@@ -488,7 +488,7 @@ class StreamingModule(Module):
                 self.session = None
                 app.notify.banner("live", t("live.failed"), "error", actions=[(t("action.details"), app._open_log)])
             elif added:
-                app.notify.toast(t("live.started", n=len(added)))
+                app.notify.toast(t("live.started", n=len(self.session.targets)))   # total al aire, no solo las nuevas
                 self._start_tick()
             if self.session is not None and not self.session.targets:
                 self.session.close()

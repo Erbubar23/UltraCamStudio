@@ -33,10 +33,12 @@ Las versiones siguen el formato `0.MENOR.PARCHE-beta`: la versión **menor** sub
 - La cabecera dice «Cámara virtual: activa / en pausa» en vez del nombre del dispositivo.
 - Textos en blanco y morado más oscuro en Transmisión para que se lean bien.
 - La interfaz se adapta a ventanas angostas sin que los controles se encimen.
+- **Web del proyecto rediseñada**: menos secciones, funciones en tres bloques (Video, Audio, Grabar y transmitir), capturas de la 0.21 y un pie que cuenta que es un proyecto mexicano, publicado primero en español.
 
 ### Correcciones
 - Los plugins VST3 instalados como carpeta (Amp Locker, Decent Sampler, KV-Element, Mobius) ya cargan (E21).
 - El panel Cámaras ya no encima el control de orientación con el botón de pausa.
+- El aviso «En vivo: transmitiendo a N destino(s)» cuenta todas las plataformas al aire, no solo la que se acaba de encender.
 
 ### Técnico
 - Código dividido en `app/` (marco) y `modules/` (cámaras, audio, grabación, general, transmisión). Los módulos no se importan entre sí.

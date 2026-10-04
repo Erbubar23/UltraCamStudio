@@ -1,13 +1,14 @@
 <!doctype html>
-<html lang="es">
+<html lang="es-MX">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>UltraCam Studio · Estudio de video y audio para Windows</title>
-<meta name="description" content="Webcams, capturadoras HDMI y tu teléfono como cámara 4K. Mezclador con VST3, grabación multipista y cámara virtual propia. Gratis y de código abierto.">
+<meta name="description" content="Webcams, capturadoras HDMI y tu teléfono como cámara 4K. Mezclador con VST3, grabación multipista, transmisión a varias plataformas y cámara virtual propia. Gratis, de código abierto y hecho en México.">
 <meta property="og:title" content="UltraCam Studio">
-<meta property="og:description" content="Tu estudio de video y audio, en una sola ventana. Gratis y de código abierto para Windows.">
+<meta property="og:description" content="Tu estudio de video y audio, en una sola ventana. Gratis, de código abierto y hecho en México.">
 <meta property="og:type" content="website">
+<meta property="og:locale" content="es_MX">
 <meta property="og:image" content="https://erbubar23.github.io/UltraCamStudio/img/principal.png">
 <meta name="theme-color" content="#111113">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23E9B24A'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23111113'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%23E9B24A'/%3E%3Ccircle cx='25.5' cy='6.5' r='2.5' fill='%23E5484D'/%3E%3C/svg%3E">
@@ -20,180 +21,157 @@
   --line:#2A2A2F;--line2:#3A3A40;
   --text:#ECEAE4;--text2:#CFCCC4;--muted:#A09D95;--faint:#8A877F;
   --accent:#E9B24A;--accent-bg:#2B2419;--accent-line:#4A3B1E;--accent-text:#F3D9A8;--on-accent:#17130A;
-  --rec:#E5484D;--rec-text:#FF7A7D;--ok:#46C386;--ok-bg:#16271E;--ok-text:#BFEBD2;--warn:#F2A65A;
+  --ok:#46C386;--warn:#F2A65A;
+  --mx-green:#006847;--mx-white:#F4F2EC;--mx-red:#CE1126;
   --display:'Bricolage Grotesque',system-ui,sans-serif;
   --body:'IBM Plex Sans',system-ui,sans-serif;
   --mono:'JetBrains Mono',ui-monospace,monospace;
-  --pad:clamp(20px,8vw,120px);
-  --section:clamp(64px,9vw,120px);
+  --pad:clamp(16px,6vw,96px);
+  --section:clamp(64px,8vw,104px);
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased;line-height:1.5}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);-webkit-font-smoothing:antialiased;line-height:1.5;overflow-x:hidden}
 img{max-width:100%;height:auto;display:block}
 a{color:var(--text);text-decoration:none}
 a:hover{color:var(--accent-text)}
 a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
 .i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
 .skip{position:absolute;left:-9999px}.skip:focus{left:16px;top:16px;z-index:10;background:var(--accent);color:var(--on-accent);padding:10px 16px;border-radius:8px}
-.wrap{max-width:1200px;margin:0 auto}
+.wrap{max-width:1160px;margin:0 auto}
+section{padding:var(--section) var(--pad);scroll-margin-top:64px}
 .band{background:var(--rail);border-block:1px solid var(--line)}
-section{padding:var(--section) var(--pad)}
 .eyebrow{font-family:var(--mono);font-size:13px;letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
 h1,h2,h3{font-family:var(--display);margin:0}
-h2{font-weight:700;font-size:clamp(32px,4vw,48px);line-height:1.08;letter-spacing:-.025em}
-h3{font-weight:700;font-size:22px}
+h2{font-weight:700;font-size:clamp(30px,3.6vw,44px);line-height:1.08;letter-spacing:-.025em}
+h3{font-weight:700;font-size:21px}
 p{margin:0}
 .lead{font-size:18px;line-height:1.6;color:var(--text2)}
-.head{display:flex;flex-direction:column;gap:16px;max-width:760px;margin-bottom:48px}
+.head{display:flex;flex-direction:column;gap:14px;max-width:720px;margin-bottom:44px}
 
 /* Botones */
 .btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:12px;font-weight:600;transition:filter .15s,background .15s}
 .btn-primary{background:var(--accent);color:var(--on-accent)}
 .btn-primary:hover{filter:brightness(1.08);color:var(--on-accent)}
-.btn-ghost{border:1px solid var(--line2);font-weight:500}
+.btn-ghost{border:1px solid var(--line2);font-weight:500;padding:0 22px}
 .btn-ghost:hover{background:var(--raised);color:var(--text)}
-.btn-lg{min-height:60px;padding:0 28px;font-size:17px}
+.btn-lg{min-height:60px;padding:0 28px;font-size:17px;text-align:left}
 .btn-lg small{display:block;font-size:13px;font-weight:400;opacity:.75}
 
 /* Cabecera */
-.top{position:sticky;top:0;z-index:5;background:rgba(17,17,19,.88);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
-.top .wrap{height:72px;display:flex;align-items:center;gap:40px;padding:0 var(--pad);max-width:none}
-.brand{display:flex;align-items:center;gap:12px;font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:-.01em}
+.top{position:sticky;top:0;z-index:5;background:rgba(17,17,19,.9);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.top .wrap{height:64px;display:flex;align-items:center;gap:32px;padding:0 var(--pad);max-width:none}
+.brand{display:flex;align-items:center;gap:12px;white-space:nowrap;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.01em}
 .top nav{display:flex;gap:28px;margin-left:auto;font-size:15px}
 .top nav a{color:var(--text2)}
 .top .btn{padding:0 18px;font-size:15px}
 
 /* Portada */
-.hero{text-align:center;padding-top:clamp(48px,7vw,88px)}
-.hero .wrap{display:flex;flex-direction:column;align-items:center;gap:24px}
-.pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 14px;border:1px solid var(--line2);border-radius:999px;font-family:var(--mono);font-size:13px;color:var(--text2)}
+.hero{text-align:center;padding-top:clamp(48px,7vw,84px);padding-bottom:0}
+.hero .wrap{display:flex;flex-direction:column;align-items:center;gap:22px}
+.pill{display:inline-flex;align-items:center;gap:10px;min-height:32px;padding:4px 14px;border:1px solid var(--line2);border-radius:999px;font-family:var(--mono);font-size:13px;color:var(--text2)}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
-.hero h1{font-weight:800;font-size:clamp(44px,6.4vw,76px);line-height:1.02;letter-spacing:-.035em;max-width:920px}
+.hero h1{font-weight:800;font-size:clamp(40px,6vw,72px);line-height:1.02;letter-spacing:-.035em;max-width:900px}
 .hero h1 span{color:var(--accent)}
-.hero .lead{font-size:clamp(17px,1.6vw,20px);max-width:760px}
-.ctas{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:12px}
-.fine{font-size:14px;color:var(--faint)}
-.shot{margin-top:40px;width:100%;border-radius:14px;border:1px solid var(--line2);overflow:hidden;background:var(--black);box-shadow:0 40px 120px rgba(0,0,0,.55)}
-
-/* Compatibilidad */
-.compat .wrap{display:flex;align-items:center;gap:32px;flex-wrap:wrap}
-.compat{padding-block:36px}
-.chips{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.chips b{font-family:var(--mono);font-size:12px;letter-spacing:.06em;color:var(--muted);font-weight:400;margin-right:4px}
-.chip{height:36px;display:inline-flex;align-items:center;padding:0 14px;border-radius:999px;border:1px solid var(--line2);font-size:14px;color:var(--text2)}
-.chip.out{border:none;background:var(--raised);color:var(--text)}
+.hero .lead{font-size:clamp(17px,1.5vw,19px);max-width:720px}
+.ctas{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+.flow{margin-top:18px;display:flex;align-items:center;justify-content:center;gap:14px 18px;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+.flow b{font-family:var(--mono);font-size:12px;letter-spacing:.06em;font-weight:400;color:var(--faint)}
+.flow .arrow{color:var(--accent)}
+.flow span.list{color:var(--text2)}
+.shot{margin-top:36px;width:100%;border-radius:14px 14px 0 0;border:1px solid var(--line2);border-bottom:0;background:var(--black);box-shadow:0 -10px 120px rgba(233,178,74,.06)}
 
 /* Funciones */
-.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-.card{padding:32px;display:flex;flex-direction:column;gap:14px;border-radius:16px;background:var(--rail);border:1px solid var(--line)}
-.card p{font-size:16px;line-height:1.6;color:var(--muted)}
-.ico{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:var(--accent-bg);color:var(--accent)}
-
-/* Cámara virtual */
-.split-head{display:flex;align-items:flex-end;gap:80px;margin-bottom:48px}
-.split-head .head{margin:0;flex:0 1 640px}
-.split-head .lead{flex:1}
-.state{height:216px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;border-radius:12px;background:var(--black);border:1px solid var(--line);text-align:center;padding:0 20px}
-.state strong{font-family:var(--display);font-size:26px;color:var(--text2);line-height:1.2}
-.state span{font-size:13px;color:var(--faint)}
-.state.live{background:var(--panel);border:1px solid var(--ok-bg)}
-.tag{position:absolute;top:12px;left:12px;height:24px;display:flex;align-items:center;gap:6px;padding:0 9px;border-radius:6px;background:var(--ok-bg);font-family:var(--mono);font-size:11px;color:var(--ok-text)}
-.tag::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
-figure{margin:0;display:flex;flex-direction:column;gap:14px}
+.pillars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.pillar{padding:28px;display:flex;flex-direction:column;gap:14px;border-radius:16px;background:var(--rail);border:1px solid var(--line)}
+.pillar > p{font-size:15.5px;line-height:1.6;color:var(--muted)}
+.ico{width:46px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:var(--accent-bg);color:var(--accent)}
+.checks{margin:6px 0 0;padding:16px 0 0;list-style:none;display:flex;flex-direction:column;gap:12px;font-size:15px;line-height:1.5;color:var(--text2);border-top:1px solid var(--line)}
+.checks li{display:flex;gap:10px;align-items:flex-start}
+.checks .i{color:var(--ok);margin-top:2px}
+.new{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:6px;background:var(--accent-bg);border:1px solid var(--accent-line);font-family:var(--mono);font-size:11px;color:var(--accent-text);vertical-align:1px}
+.shots{margin-top:20px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.shots figure{margin:0;display:flex;flex-direction:column;gap:12px}
+.shots img{border-radius:12px;border:1px solid var(--line2);background:var(--black)}
 figcaption{font-size:15px;line-height:1.5;color:var(--muted)}
 figcaption strong{color:var(--text);font-weight:600}
-.spec{margin-top:32px;font-family:var(--mono);font-size:13px;color:var(--faint)}
-
-/* Audio */
-.audio .wrap{display:flex;align-items:center;gap:80px}
-.audio .copy{flex:0 0 520px;display:flex;flex-direction:column;gap:20px}
-.checks{margin:8px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px;font-size:16px;color:var(--text2)}
-.checks li{display:flex;gap:12px}
-.checks .i{color:var(--ok);margin-top:2px}
-.mixer{flex:1;min-width:0;height:440px;padding:24px;display:flex;flex-direction:column;gap:16px;border-radius:16px;background:var(--rail);border:1px solid var(--line)}
-.mixer-top{display:flex;gap:10px;font-size:13px;color:var(--muted);letter-spacing:.08em}
-.mixer-top span:last-child{margin-left:auto;font-family:var(--mono);font-size:12px;letter-spacing:0;color:var(--ok-text)}
-.strips{flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.strip{padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:12px;border-radius:10px;background:var(--panel)}
-.strip.fx{border:1px solid var(--accent-line)}
-.strip.master{background:var(--raised)}
-.strip b{font-size:13px;font-weight:500}
-.strip small{font-family:var(--mono);font-size:10px;color:var(--faint)}
-.meter{flex:1;display:flex;gap:4px}
-.meter i{width:8px;display:flex;flex-direction:column;justify-content:flex-end;border-radius:3px;background:var(--black)}
-.meter i::after{content:"";height:var(--h);border-radius:3px;background:var(--c)}
-.ms{display:flex;gap:6px}
-.ms span{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--raised);font-size:11px;color:var(--text2)}
-
-/* Capturas */
-.gallery{display:grid;grid-template-columns:2fr 1fr;gap:24px}
-.gallery .side{display:flex;flex-direction:column;gap:24px}
-.gallery img{border-radius:14px;border:1px solid var(--line2);background:var(--black);width:100%;height:auto}
 
 /* Empezar */
-.start .wrap{display:flex;gap:80px}
-.steps{margin:40px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:28px}
-.steps li{display:flex;gap:20px}
-.num{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--line2);font-family:var(--mono);font-size:15px;color:var(--accent)}
-.steps b{display:block;font-size:19px;font-weight:600;margin-bottom:6px}
-.steps span{font-size:16px;line-height:1.55;color:var(--muted)}
-.note{margin-top:40px;padding:20px 24px;display:flex;gap:16px;border-radius:12px;background:var(--accent-bg);border:1px solid var(--accent-line);font-size:15px;line-height:1.6;color:var(--accent-text)}
+.start .wrap{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:64px;align-items:start}
+.steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:26px}
+.steps li{display:flex;gap:18px}
+.num{width:42px;height:42px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--line2);font-family:var(--mono);font-size:15px;color:var(--accent)}
+.steps b{display:block;font-size:18px;font-weight:600;margin-bottom:4px}
+.steps span{font-size:15.5px;line-height:1.55;color:var(--muted)}
+.note{margin-top:32px;padding:18px 22px;display:flex;gap:14px;border-radius:12px;background:var(--accent-bg);border:1px solid var(--accent-line);font-size:15px;line-height:1.6;color:var(--accent-text)}
 .note .i{color:var(--warn);margin-top:2px}
-.reqs{flex:0 0 440px;align-self:flex-start;padding:32px;display:flex;flex-direction:column;gap:20px;border-radius:16px;background:var(--rail);border:1px solid var(--line)}
-.reqs h3{font-size:24px}
-.reqs ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:16px;font-size:15px;line-height:1.55;color:var(--text2)}
-.reqs li{display:flex;gap:12px}
-.reqs strong{color:var(--text);font-weight:600}
-.reqs .i{margin-top:3px;color:var(--ok)}
-.reqs .opt .i{color:var(--faint)}
+.dl{padding:28px;display:flex;flex-direction:column;gap:18px;border-radius:16px;background:var(--panel);border:1px solid var(--line2)}
+.dl h3{font-size:22px}
+.dl .ver{font-family:var(--mono);font-size:13px;color:var(--faint)}
+.dl ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:12px;font-size:15px;line-height:1.5;color:var(--text2)}
+.dl li{display:flex;gap:10px}
+.dl strong{color:var(--text);font-weight:600}
+.dl .i{margin-top:3px;color:var(--ok)}
+.dl .opt .i{color:var(--faint)}
+.dl .btn-lg{width:100%;justify-content:flex-start}
+.dl .more{font-size:14px;color:var(--muted);text-align:center}
+.dl .more a{color:var(--text2);text-decoration:underline;text-underline-offset:3px}
 
 /* Preguntas */
-.faq .wrap{display:flex;gap:80px}
-.faq .head{flex:0 0 380px;margin:0}
+.faq .wrap{display:grid;grid-template-columns:340px minmax(0,1fr);gap:64px}
+.faq .head{margin:0}
 .faq .head a{color:var(--accent);text-decoration:underline}
-.qs{flex:1;border-top:1px solid var(--line)}
+.qs{border-top:1px solid var(--line)}
 details{border-bottom:1px solid var(--line)}
-summary{min-height:72px;display:flex;align-items:center;gap:16px;font-size:19px;font-weight:600;cursor:pointer;list-style:none;padding:12px 0}
+summary{min-height:66px;display:flex;align-items:center;gap:16px;font-size:18px;font-weight:600;cursor:pointer;list-style:none;padding:12px 0}
 summary::-webkit-details-marker{display:none}
 summary::after{content:"+";margin-left:auto;font-family:var(--mono);font-size:22px;font-weight:400;color:var(--muted)}
 details[open] summary::after{content:"−";color:var(--accent)}
-details p{padding:0 40px 24px 0;font-size:16px;line-height:1.65;color:var(--muted)}
+details p{padding:0 40px 22px 0;font-size:16px;line-height:1.65;color:var(--muted)}
 
-/* Cierre */
-.final{display:flex;align-items:center;gap:48px;padding:72px;border-radius:24px;background:var(--panel);border:1px solid var(--line2)}
-.final div:first-child{flex:1;display:flex;flex-direction:column;gap:14px}
-.final h2{font-weight:800;font-size:clamp(36px,4.6vw,56px);line-height:1.04}
-.final .ctas{flex-direction:column;align-items:stretch;margin:0}
-
-footer{padding:40px var(--pad);border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
-footer .wrap{display:flex;align-items:center;gap:32px;flex-wrap:wrap;max-width:none}
-footer .brand{font-size:16px;font-family:var(--body);font-weight:600;color:var(--text)}
-footer nav{margin-left:auto;display:flex;gap:28px;flex-wrap:wrap}
-footer nav a{color:var(--text2)}
+/* Pie */
+footer{position:relative;background:var(--rail);border-top:1px solid var(--line);font-size:15px;color:var(--muted)}
+.mx-bar{height:4px;display:grid;grid-template-columns:repeat(3,1fr)}
+.mx-bar i:nth-child(1){background:var(--mx-green)}.mx-bar i:nth-child(2){background:var(--mx-white)}.mx-bar i:nth-child(3){background:var(--mx-red)}
+.foot{padding:64px var(--pad) 32px}
+.foot-top{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2fr);gap:64px}
+.origin{display:flex;flex-direction:column;gap:16px}
+.origin .brand{font-size:18px;color:var(--text)}
+.made{align-self:flex-start;display:inline-flex;align-items:center;gap:10px;padding:8px 14px 8px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line2);font-weight:600;color:var(--text)}
+.flag{width:30px;height:20px;border-radius:3px;overflow:hidden;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.08)}
+.origin-title{font-size:clamp(24px,2.4vw,30px);line-height:1.15;letter-spacing:-.02em;color:var(--text)}
+.origin-title span{color:var(--accent)}
+.origin p{line-height:1.65;color:var(--text2);max-width:440px}
+.origin p + p{color:var(--muted);font-size:14.5px}
+.origin a{color:var(--accent-text);text-decoration:underline;text-underline-offset:3px}
+.cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px}
+.cols h4{margin:0 0 14px;font-family:var(--mono);font-size:12px;font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.cols ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+.cols a{color:var(--text2)}
+.foot-bottom{margin-top:48px;padding-top:24px;border-top:1px solid var(--line);display:flex;gap:12px 24px;flex-wrap:wrap;font-size:14px;color:var(--faint)}
+.foot-bottom span:last-child{margin-left:auto}
 
 @media (max-width:1000px){
   .top nav{display:none}
   .top .btn{margin-left:auto}
-  .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .split-head,.audio .wrap,.start .wrap,.faq .wrap{flex-direction:column;align-items:stretch;gap:40px}
-  .audio .copy,.reqs,.faq .head{flex:none}
-  .split-head .head{flex:none}
-  .gallery{grid-template-columns:1fr}
-  .final{flex-direction:column;align-items:stretch;padding:40px 28px}
+  .pillars{grid-template-columns:1fr}
+  .start .wrap,.faq .wrap{grid-template-columns:1fr;gap:40px}
+  .foot-top{grid-template-columns:1fr;gap:44px}
 }
 @media (max-width:640px){
-  .grid3{grid-template-columns:1fr}
-  .card{padding:22px}
+  .top .wrap{gap:12px}
+  .brand{font-size:17px;gap:10px}
   .hero{text-align:left}
   .hero .wrap{align-items:flex-start}
   .ctas{flex-direction:column;align-items:stretch;width:100%}
-  .mixer{height:280px;padding:16px}
-  .strip{padding:10px 4px}.ms,.strip small{display:none}
+  .flow{justify-content:flex-start}
+  .pillar,.dl{padding:22px}
+  .shots{grid-template-columns:1fr}
   summary{font-size:17px}
   details p{padding-right:0}
-  footer .wrap{flex-direction:column;align-items:flex-start}
-  footer nav{margin:0;flex-direction:column;gap:12px}
+  .cols{grid-template-columns:repeat(2,minmax(0,1fr));gap:32px 24px}
+  .foot-bottom{flex-direction:column}
+  .foot-bottom span:last-child{margin-left:0}
 }
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
@@ -204,16 +182,14 @@ footer nav a{color:var(--text2)}
 <header class="top">
   <div class="wrap">
     <a class="brand" href="#" aria-label="UltraCam Studio, inicio">
-      <svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#E9B24A"/><circle cx="16" cy="16" r="8" fill="#111113"/><circle cx="16" cy="16" r="3.5" fill="#E9B24A"/><circle cx="25.5" cy="6.5" r="2.5" fill="#E5484D"/></svg>
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#E9B24A"/><circle cx="16" cy="16" r="8" fill="#111113"/><circle cx="16" cy="16" r="3.5" fill="#E9B24A"/><circle cx="25.5" cy="6.5" r="2.5" fill="#E5484D"/></svg>
       UltraCam Studio
     </a>
     <nav aria-label="Secciones">
       <a href="#funciones">Funciones</a>
-      <a href="#capturas">Capturas</a>
       <a href="#empezar">Cómo empezar</a>
       <a href="#preguntas">Preguntas</a>
       <a href="https://github.com/Erbubar23/UltraCamStudio">GitHub</a>
-      <a href="https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878" target="_blank" rel="noopener">Donate</a>
     </nav>
     <a class="btn btn-primary" href="https://github.com/Erbubar23/UltraCamStudio/releases/download/v0.21.0-beta/UltraCamStudio-Portable-0.21.0-beta.zip">
       <svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
@@ -227,7 +203,7 @@ footer nav a{color:var(--text2)}
   <div class="wrap">
     <span class="pill"><span class="dot"></span>Beta 0.21 · Windows · Gratis y de código abierto</span>
     <h1>Tu estudio de video y audio, <span>en una sola ventana.</span></h1>
-    <p class="lead">Webcams, capturadoras HDMI y tu teléfono como cámara 4K. Mezcla el audio con efectos e instrumentos VST3, graba multipista, transmite a varias plataformas a la vez y envía tu imagen a Zoom, Teams u OBS con una cámara virtual propia.</p>
+    <p class="lead">Usa tu teléfono, webcam o capturadora como cámara. Mezcla el audio con plugins VST3, graba multipista y transmite a varias plataformas a la vez.</p>
     <div class="ctas">
       <a class="btn btn-primary btn-lg" href="https://github.com/Erbubar23/UltraCamStudio/releases/download/v0.21.0-beta/UltraCamStudio-Portable-0.21.0-beta.zip">
         <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
@@ -238,88 +214,63 @@ footer nav a{color:var(--text2)}
         Ver el código
       </a>
     </div>
-    <p class="fine">Sin cuentas, sin anuncios. Tus grabaciones se quedan en tu PC.</p>
-    <img class="shot" src="img/principal.png" width="1600" height="1000" alt="Ventana principal de UltraCam Studio: lista de cámaras a la izquierda, imagen al centro y mezclador de audio a la derecha.">
+    <div class="flow" aria-label="Qué entra y a dónde sale">
+      <b>ENTRA</b><span class="list">Webcams · Capturadoras HDMI · Android · iPhone</span>
+      <svg class="i arrow" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h16M14 6l6 6-6 6"/></svg>
+      <b>SALE A</b><span class="list">Zoom · Teams · Meet · OBS · YouTube · Twitch · TikTok · Instagram · Facebook · Kick</span>
+    </div>
+    <img class="shot" src="img/principal.png" width="1600" height="980" alt="Ventana principal de UltraCam Studio: barra de módulos a la izquierda, panel de cámaras, la imagen al centro y el mezclador de audio a la derecha.">
   </div>
 </section>
 
-<section class="compat band" aria-label="Compatibilidad">
-  <div class="wrap">
-    <div class="chips"><b>ENTRA</b><span class="chip">Webcams USB</span><span class="chip">Capturadoras HDMI</span><span class="chip">Android 12+</span><span class="chip">iPhone</span></div>
-    <svg class="i" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="color:var(--accent)"><path d="M4 12h16M14 6l6 6-6 6"/></svg>
-    <div class="chips"><b>SALE A</b><span class="chip out">Zoom</span><span class="chip out">Teams</span><span class="chip out">Discord</span><span class="chip out">Meet</span><span class="chip out">OBS</span><span class="chip out">YouTube</span><span class="chip out">Twitch</span><span class="chip out">TikTok</span><span class="chip out">Instagram</span><span class="chip out">Facebook</span><span class="chip out">Kick</span></div>
-  </div>
-</section>
-
-<section id="funciones">
+<section id="funciones" class="band">
   <div class="wrap">
     <div class="head">
       <span class="eyebrow">Funciones</span>
       <h2>Todo lo que antes necesitaba cuatro programas.</h2>
-      <p class="lead">Cámara, audio, grabación, transmisión y cámara virtual trabajan juntos: eliges una fuente una vez y llega a todas partes.</p>
+      <p class="lead">Eliges una cámara una vez y llega a la grabación, al monitor, a la cámara virtual y a la transmisión.</p>
     </div>
-    <div class="grid3">
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="10" r="6"/><circle cx="12" cy="10" r="2"/><path d="M8 20h8M12 16v4"/></svg></span><h3>Todas tus cámaras, solas</h3><p>Webcams USB, capturadoras HDMI, cámaras de laptop y virtuales aparecen en una lista. Elige una y la imagen está ahí, dentro de la app.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg></span><h3>Tu teléfono, cámara 4K</h3><p>Android 12+ por cable, hasta 4K o a 60 fps reales en 1080p. iPhone por Wi-Fi o cable con DroidCam, Camo o Iriun. Si se desconecta, la app lo espera y reanuda sola.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16M4 14h4M10 8h4M16 16h4"/></svg></span><h3>Mezclador con VST3</h3><p>Canales libres con volumen, silencio, solo y vúmetro. Efectos VST3 por canal; si un plugin falla, la app sigue abierta.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/></svg></span><h3>Cámara virtual propia</h3><p>«UltraCam» aparece en Zoom, Teams, Discord, Meet y OBS. Sin instalar OBS y sin permisos de administrador.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l2-6 3 12 3-9 2 5 2-2h4"/></svg></span><h3>Grabación multipista</h3><p>Un MP4 con la mezcla y una pista por canal, más stems WAV de 24 bits. Normalización a −14 LUFS para YouTube.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 8v8M21 8v8"/></svg></span><h3>Vertical 9:16 para redes</h3><p>El teléfono graba en vertical a resolución completa; la webcam, con recorte central o girada si está de lado.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg></span><h3>Transmite a varias plataformas</h3><p>YouTube, Twitch, Facebook, Kick, TikTok e Instagram a la vez. Cada una se enciende y apaga sola; una prueba de velocidad te dice cuántas aguanta tu conexión.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 5v8M12 5v8M16 5v8"/></svg></span><h3>Instrumentos VST3 con MIDI</h3><p>Toca Vital, Decent Sampler o Kontakt con tu teclado MIDI. Explorador de plugins con favoritos, categorías y búsqueda.</p></article>
-      <article class="card"><span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></span><h3>Videos más ligeros, guardado seguro</h3><p>La toma final pesa unas 3 veces menos con la misma calidad. Los originales se borran solo después de comprobar que el archivo quedó completo.</p></article>
+    <div class="pillars">
+      <article class="pillar">
+        <span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="13" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/></svg></span>
+        <h3>Video</h3>
+        <p>Todas tus cámaras en una lista y la imagen dentro de la app, casi sin retraso.</p>
+        <ul class="checks">
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Webcams USB, capturadoras HDMI y cámaras de laptop</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Android por cable hasta 4K, o 60 fps reales en 1080p <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>iPhone por Wi-Fi o cable con DroidCam, Camo o Iriun</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Vertical 9:16 para redes a resolución completa</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Cámara virtual «UltraCam» para Zoom, Teams, Meet y OBS, sin instalar OBS</span></li>
+        </ul>
+      </article>
+      <article class="pillar">
+        <span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4v16M12 4v16M18 4v16M4 14h4M10 8h4M16 16h4"/></svg></span>
+        <h3>Audio</h3>
+        <p>Un mezclador de estudio siempre a la vista. Con ASIO la latencia baja a unos 10 ms.</p>
+        <ul class="checks">
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Canales libres: tu interfaz, otros dispositivos o lo que suena en la PC</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Efectos VST3 por canal; si un plugin falla, la app sigue abierta</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Instrumentos VST3 que tocas con tu teclado MIDI <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Explorador de plugins con favoritos y búsqueda <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Te escuchas con el tono del plugin, sin el retraso de la grabación</span></li>
+        </ul>
+      </article>
+      <article class="pillar">
+        <span class="ico"><svg class="i" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></svg></span>
+        <h3>Grabar y transmitir</h3>
+        <p>Un MP4 listo para editar, y en vivo a todas tus plataformas al mismo tiempo.</p>
+        <ul class="checks">
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Transmite a YouTube, Twitch, Facebook, Kick, TikTok e Instagram a la vez <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Prueba de velocidad: te dice cuántas plataformas aguanta tu conexión <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Pista de mezcla y una por canal, más stems WAV de 24 bits</span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Videos unas 3 veces más ligeros con la misma calidad <em class="new">Nuevo</em></span></li>
+          <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span>Guardado seguro: los originales se borran solo si el archivo quedó completo</span></li>
+        </ul>
+      </article>
     </div>
-  </div>
-</section>
-
-<section class="band">
-  <div class="wrap">
-    <div class="split-head">
-      <div class="head"><span class="eyebrow">Cámara virtual</span><h2>Nunca en negro. Nunca desconectada.</h2></div>
-      <p class="lead">Los demás programas siempre ven a «UltraCam». Sin imagen muestra un cartel; con la app cerrada, lo dice. Al reabrirla, la imagen vuelve sola.</p>
-    </div>
-    <div class="grid3">
-      <figure><div class="state live"><strong>Tu cámara</strong><span>UltraCam</span><span class="tag">EN VIVO</span></div><figcaption><strong>Transmitiendo.</strong> Cambias de cámara y mantiene el último cuadro hasta que llega la nueva.</figcaption></figure>
-      <figure><div class="state"><strong>Sin señal</strong><span>UltraCam</span></div><figcaption><strong>En pausa.</strong> Si no le envías imagen, muestra un cartel en vez de una pantalla negra.</figcaption></figure>
-      <figure><div class="state"><strong>UltraCam Studio está cerrado</strong><span>UltraCam</span></div><figcaption><strong>App cerrada.</strong> Zoom o Teams no pierden la cámara; la imagen vuelve al reabrir.</figcaption></figure>
-    </div>
-    <p class="spec">1080p o 720p a 30/60 fps · 360p · NV12 o YUY2 · convive con la cámara virtual de OBS</p>
-  </div>
-</section>
-
-<section class="audio">
-  <div class="wrap">
-    <div class="copy">
-      <span class="eyebrow">Audio</span>
-      <h2>Suena como un estudio, no como una llamada.</h2>
-      <p class="lead">Con una interfaz ASIO la latencia ida y vuelta baja a unos 10 ms (búfer 128). Te escuchas con el tono del plugin por el Monitor, sin el retraso de la grabación.</p>
-      <ul class="checks">
-        <li><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg>Entradas de tu interfaz, otros dispositivos o lo que suena en la PC</li>
-        <li><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg>Las fuentes extra se sincronizan con el reloj principal</li>
-        <li><svg class="i" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg>El preset de cada plugin se guarda solo</li>
-      </ul>
-    </div>
-    <div class="mixer" role="img" aria-label="Ilustración del mezclador: canales Sistema, Guitarra con efectos, Voz y Master con sus vúmetros.">
-      <div class="mixer-top"><span>MEZCLADOR</span><span>ASIO · 48 kHz · 128</span></div>
-      <div class="strips">
-        <div class="strip"><b style="color:#6EA8FE">Sistema</b><small>LOOPBACK</small><div class="meter"><i style="--h:38%;--c:#6EA8FE"></i><i style="--h:34%;--c:#6EA8FE"></i></div><div class="ms"><span>M</span><span>S</span></div></div>
-        <div class="strip fx"><b style="color:#B48CF2">Guitarra</b><small style="color:var(--accent)">FX · VST3</small><div class="meter"><i style="--h:74%;--c:#B48CF2"></i><i style="--h:74%;--c:#B48CF2"></i></div><div class="ms"><span>M</span><span style="background:var(--accent-bg);color:var(--accent-text)">S</span></div></div>
-        <div class="strip"><b style="color:#EC7FB6">Voz</b><small>ENTRADA 2</small><div class="meter"><i style="--h:56%;--c:#EC7FB6"></i><i style="--h:56%;--c:#EC7FB6"></i></div><div class="ms"><span>M</span><span>S</span></div></div>
-        <div class="strip master"><b style="font-weight:600">Master</b><small>−14 LUFS</small><div class="meter"><i style="--h:66%;--c:#46C386"></i><i style="--h:63%;--c:#46C386"></i></div><div class="ms"><span style="width:auto;padding:0 6px;background:none;color:var(--ok-text);font-family:var(--mono)">−6 dB</span></div></div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section id="capturas" class="band">
-  <div class="wrap">
-    <div class="head"><span class="eyebrow">Capturas</span><h2>Así se ve la beta.</h2></div>
-    <div class="gallery">
-      <figure><img src="img/principal.png" width="1600" height="1000" alt="Pantalla principal con una cámara seleccionada y el mezclador." loading="lazy"><figcaption>Cámaras a la izquierda, imagen al centro, mezclador a la derecha.</figcaption></figure>
-      <div class="side">
-        <figure><img src="img/config-canales.png" width="1076" height="779" alt="Canales y efectos: un canal de guitarra con el plugin VST3 Tonocracy cargado." loading="lazy"><figcaption>Cada canal con su cadena de efectos VST3.</figcaption></figure>
-        <figure><img src="img/config-vcam.png" width="1076" height="779" alt="Configuración de la cámara virtual UltraCam." loading="lazy"><figcaption>La cámara virtual, lista para Zoom, Teams u OBS.</figcaption></figure>
-      </div>
+    <div class="shots">
+      <figure><img src="img/transmision.png" width="1360" height="880" alt="Panel Transmisión: recuadros de YouTube, Twitch y TikTok, cada uno con su botón de encendido, y la prueba de velocidad." loading="lazy"><figcaption><strong>Transmisión.</strong> Cada plataforma se enciende sola, sin cortar a las demás.</figcaption></figure>
+      <figure><img src="img/camaras.png" width="1360" height="880" alt="Panel Cámaras: ajustes de la cámara elegida en tarjetas de formato, orientación y cámara." loading="lazy"><figcaption><strong>Cámaras.</strong> Eliges una y sus ajustes se abren en un solo lugar.</figcaption></figure>
     </div>
   </div>
 </section>
@@ -327,23 +278,27 @@ footer nav a{color:var(--text2)}
 <section id="empezar" class="start">
   <div class="wrap">
     <div>
-      <div class="head" style="margin:0"><span class="eyebrow">Cómo empezar</span><h2>Listo en un minuto.</h2></div>
+      <div class="head"><span class="eyebrow">Cómo empezar</span><h2>Listo en un minuto.</h2></div>
       <ol class="steps">
-        <li><span class="num">1</span><div><b>Descarga el ZIP portable</b><span>No se instala nada ni necesitas Python: FFmpeg, scrcpy y el motor de audio vienen incluidos.</span></div></li>
+        <li><span class="num">1</span><div><b>Descarga el ZIP portable</b><span>No se instala nada ni necesitas Python: FFmpeg, scrcpy, MediaMTX y el motor de audio vienen incluidos.</span></div></li>
         <li><span class="num">2</span><div><b>Descomprime y abre UltraCamStudio.exe</b><span>En el Escritorio, Documentos o una memoria USB. Evita «Archivos de programa»: ahí no se puede guardar la configuración.</span></div></li>
-        <li><span class="num">3</span><div><b>Elige tu cámara y pulsa Grabar</b><span>Tus tomas quedan en Videos\GalaxyCam, listas en «Tomas recientes».</span></div></li>
+        <li><span class="num">3</span><div><b>Elige tu cámara y pulsa Grabar o Transmitir</b><span>Tus tomas quedan en Videos\GalaxyCam. La transmisión se activa desde la barra lateral.</span></div></li>
       </ol>
       <div class="note"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M12 9v4M12 16.5v.5"/></svg><p>¿Aparece «Windows protegió tu PC»? Es porque la beta aún no está firmada. Pulsa <strong>Más información</strong> y luego <strong>Ejecutar de todas formas</strong>.</p></div>
     </div>
-    <aside class="reqs" aria-label="Requisitos">
-      <h3>Requisitos</h3>
+    <aside class="dl" aria-label="Descarga y requisitos">
+      <div><h3>Descargar</h3><span class="ver">v0.21.0-beta · Windows de 64 bits</span></div>
+      <a class="btn btn-primary btn-lg" href="https://github.com/Erbubar23/UltraCamStudio/releases/download/v0.21.0-beta/UltraCamStudio-Portable-0.21.0-beta.zip">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        <span>UltraCamStudio-Portable.zip<small>156 MB · sin instalar</small></span>
+      </a>
       <ul>
         <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span><strong>Windows de 64 bits</strong></span></li>
         <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span><strong>Android 12 o superior</strong> con Depuración USB (la app te guía)</span></li>
-        <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span><strong>iPhone</strong> con DroidCam, Camo o Iriun en el teléfono y en la PC (por cable, además, «Dispositivos Apple»)</span></li>
-        <li class="opt"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span><strong>Opcional:</strong> interfaz de audio con driver ASIO para tocar con poca latencia</span></li>
-        <li class="opt"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span><strong>Opcional:</strong> GPU con codificador de video (NVIDIA, Intel Quick Sync o AMD); se usa sola</span></li>
+        <li><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l4 4 10-10"/></svg><span><strong>iPhone</strong> con DroidCam, Camo o Iriun en el teléfono y en la PC</span></li>
+        <li class="opt"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span><strong>Opcional:</strong> interfaz de audio ASIO y GPU con codificador de video (NVIDIA, Intel o AMD)</span></li>
       </ul>
+      <p class="more"><a href="https://github.com/Erbubar23/UltraCamStudio/releases">Todas las versiones</a> · <a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/CHANGELOG.md">Qué hay de nuevo</a></p>
     </aside>
   </div>
 </section>
@@ -353,35 +308,57 @@ footer nav a{color:var(--text2)}
     <div class="head"><span class="eyebrow">Preguntas</span><h2>Lo que suelen preguntar.</h2><p style="color:var(--muted)">¿Otra duda? <a href="https://github.com/Erbubar23/UltraCamStudio/issues">Pregunta en GitHub</a>.</p></div>
     <div class="qs">
       <details open><summary>¿Es gratis?</summary><p>Sí. UltraCam Studio es software libre con licencia GPLv3: sin cuentas, sin anuncios y con todo el código en GitHub.</p></details>
+      <details><summary>¿Puedo transmitir a varias plataformas a la vez?</summary><p>Sí. Agregas cada plataforma con su clave y la enciendes o apagas sin cortar a las demás. La app codifica tu video una sola vez y lo reparte. La prueba de velocidad te dice cuántas aguanta tu conexión.</p></details>
       <details><summary>¿Necesito OBS para la cámara virtual?</summary><p>No. «UltraCam» es un driver propio que la app registra al abrirse, sin permisos de administrador. Si ya usas la cámara virtual de OBS, conviven sin problema.</p></details>
+      <details><summary>¿La app envía mis datos a algún lado?</summary><p>Solo lo que tú decides transmitir, directo a tus plataformas. Las grabaciones, la configuración y los reportes de problemas se quedan en tu PC, y las claves de transmisión se guardan cifradas. La prueba de velocidad sube datos de prueba a Cloudflare, sin nada tuyo.</p></details>
+      <details><summary>¿Por qué está en español?</summary><p>Porque es un proyecto mexicano, pensado primero para creadores, músicos y streamers de habla hispana. La interfaz está lista para traducirse; si quieres ayudar con otro idioma, abre un issue en GitHub.</p></details>
       <details><summary>¿Por qué Windows dice que protegió mi PC?</summary><p>La beta todavía no tiene firma digital. Pulsa «Más información» y luego «Ejecutar de todas formas». El código completo está en GitHub para quien quiera revisarlo.</p></details>
-      <details><summary>¿La app envía mis datos a algún lado?</summary><p>No. Las grabaciones, la configuración y los reportes de problemas se quedan en tu PC. Si algo falla, tú decides si copias el reporte y lo compartes.</p></details>
       <details><summary>¿Qué significa que sea beta?</summary><p>Que ya sirve para grabar y transmitir, pero seguimos puliendo detalles. Si encuentras un fallo, usa General › Avanzado › Diagnóstico › «Copiar registro» y ábrelo como issue en GitHub.</p></details>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap final">
-    <div><h2>Prueba la beta hoy.</h2><p class="lead">Gratis, portable y sin instalar. v0.21.0-beta · Windows de 64 bits.</p></div>
-    <div class="ctas">
-      <a class="btn btn-primary btn-lg" href="https://github.com/Erbubar23/UltraCamStudio/releases/download/v0.21.0-beta/UltraCamStudio-Portable-0.21.0-beta.zip"><svg class="i" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Descargar portable</a>
-      <a class="btn btn-ghost" href="https://github.com/Erbubar23/UltraCamStudio/releases" style="min-height:48px;padding:0 20px;color:var(--text2)">Todas las versiones</a>
     </div>
   </div>
 </section>
 </main>
 
 <footer>
-  <div class="wrap">
-    <span class="brand"><svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#E9B24A"/><circle cx="16" cy="16" r="8" fill="#111113"/><circle cx="16" cy="16" r="3.5" fill="#E9B24A"/></svg>UltraCam Studio</span>
-    <span>Software libre · GPLv3 · © 2026 UltraCam Studio</span>
-    <nav aria-label="Enlaces del pie">
-      <a href="https://github.com/Erbubar23/UltraCamStudio">Código</a>
-      <a href="https://github.com/Erbubar23/UltraCamStudio/issues">Reportar un problema</a>
-      <a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/LICENSE">Licencia</a>
-      <a href="https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878" target="_blank" rel="noopener">Donate</a>
-    </nav>
+  <div class="mx-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="foot">
+    <div class="wrap">
+      <div class="foot-top">
+        <div class="origin">
+          <span class="brand"><svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="#E9B24A"/><circle cx="16" cy="16" r="8" fill="#111113"/><circle cx="16" cy="16" r="3.5" fill="#E9B24A"/><circle cx="25.5" cy="6.5" r="2.5" fill="#E5484D"/></svg>UltraCam Studio</span>
+          <span class="made"><svg class="flag" viewBox="0 0 3 2" aria-hidden="true"><rect width="1" height="2" fill="#006847"/><rect x="1" width="1" height="2" fill="#F4F2EC"/><rect x="2" width="1" height="2" fill="#CE1126"/><circle cx="1.5" cy="1" r=".28" fill="#8C5A2B"/></svg>Hecho en México</span>
+          <h3 class="origin-title">Un proyecto mexicano, <span>hecho en español.</span></h3>
+          <p>UltraCam Studio nace y se desarrolla en México. Por eso la app, su documentación y esta página se publican primero en español: está pensada para creadores, músicos y streamers de habla hispana.</p>
+          <p>La interfaz está preparada para traducirse. Si quieres verla en tu idioma, <a href="https://github.com/Erbubar23/UltraCamStudio/issues">propón una traducción</a>.</p>
+        </div>
+        <nav class="cols" aria-label="Enlaces del pie">
+          <div><h4>Proyecto</h4><ul>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio">Código fuente</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/releases">Versiones</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/CHANGELOG.md">Historial de cambios</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/ERRORS_RESOLVED.md">Registro técnico</a></li>
+          </ul></div>
+          <div><h4>Ayuda</h4><ul>
+            <li><a href="#empezar">Cómo empezar</a></li>
+            <li><a href="#preguntas">Preguntas</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/issues">Reportar un problema</a></li>
+          </ul></div>
+          <div><h4>Legal</h4><ul>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/LICENSE">Licencia GPLv3</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio/blob/main/THIRD_PARTY_NOTICES.md">Componentes de terceros</a></li>
+          </ul></div>
+          <div><h4>Apoya</h4><ul>
+            <li><a href="https://www.paypal.com/donate/?hosted_button_id=TGKZ4QZPA5878" target="_blank" rel="noopener">Donar</a></li>
+            <li><a href="https://github.com/Erbubar23/UltraCamStudio">Dar una estrella</a></li>
+          </ul></div>
+        </nav>
+      </div>
+      <div class="foot-bottom">
+        <span>© 2026 UltraCam Studio · Software libre GPLv3</span>
+        <span>v0.21.0-beta</span>
+        <span>Hecho en México, en español</span>
+      </div>
+    </div>
   </div>
 </footer>
 </body>
